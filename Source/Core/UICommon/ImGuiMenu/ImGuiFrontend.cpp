@@ -1401,6 +1401,9 @@ FrontendResult ImGuiFrontend::RunMainLoop()
 {
   FrontendResult selection;
 
+  // coming back to the menus (e.g. after a game or the Wii System Menu): the controller works
+  m_state.controlsDisabled = false;
+
   if (g_netplay_dialog)
   {
     // Reset for if we're exiting a game into netplay again
@@ -1602,23 +1605,6 @@ FrontendResult ImGuiFrontend::RunMainLoop()
       }
       ImGui::End();
 
-      // B backs out: first the controller mapping screen, then the settings window. Not while
-      // a drop-down list is open or a box is being edited (B closes those itself).
-      if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) && !m_state.controlsDisabled &&
-          !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
-          !ImGui::IsAnyItemActive())
-      {
-        if (m_state.showMappingWindow)
-        {
-          if (!m_state.capturingRef)
-            CloseMappingWindow();
-        }
-        else
-        {
-          m_state.showSettingsWindow = false;
-          Config::Save();
-        }
-      }
     }
     else if (m_state.showPropertiesWindow && m_state.propertiesGame)
     {
@@ -1652,6 +1638,55 @@ FrontendResult ImGuiFrontend::RunMainLoop()
         break;
       }
     }
+
+    // B is "back" on every screen: the controller mapping screen, then Settings, game info and the
+    // game list. Not while a drop-down list is open or a box is being edited (B closes those).
+    if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) && !m_state.controlsDisabled &&
+        !m_state.capturingRef &&
+        !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
+        !ImGui::IsAnyItemActive())
+    {
+      if (m_state.showSettingsWindow && m_state.showMappingWindow)
+      {
+        CloseMappingWindow();
+      }
+      else if (m_state.showSettingsWindow)
+      {
+        m_state.showSettingsWindow = false;
+        Config::Save();
+      }
+      else if (m_state.showPropertiesWindow)
+      {
+        m_state.showPropertiesWindow = false;
+        Config::Save();
+      }
+      else if (m_state.showListView)
+      {
+        m_state.showListView = false;
+      }
+    }
+
+#ifdef WINRT_XBOX
+    // Some settings buttons lock the controller while a system picker is open, and a few never
+    // unlocked it (e.g. after a cancelled picker or Load Wii System Menu), which left every menu
+    // stuck. Once Dolphin is back in front for a couple of seconds, unlock it.
+    {
+      static std::chrono::steady_clock::time_point s_front_since{};
+      bool in_front = false;
+      try
+      {
+        in_front = CoreWindow::GetForCurrentThread().ActivationMode() ==
+                   winrt::Windows::UI::Core::CoreWindowActivationMode::ActivatedInForeground;
+      }
+      catch (...)
+      {
+      }
+      if (!m_state.controlsDisabled || !in_front)
+        s_front_since = std::chrono::steady_clock::now();
+      else if (std::chrono::steady_clock::now() - s_front_since > std::chrono::seconds(2))
+        m_state.controlsDisabled = false;
+    }
+#endif
 
     // Draw achievements window if enabled and game is loaded
     DrawAchievementsWindow(&m_state);
