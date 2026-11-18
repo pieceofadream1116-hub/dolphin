@@ -41,13 +41,12 @@ static const QString BOX_SPLITTER_STYLESHEET = QStringLiteral(
 
 CodeWidget::CodeWidget(QWidget* parent)
     : QDockWidget(parent), m_system(Core::System::GetInstance()),
-      m_ppc_symbol_db(m_system.GetPPCSymbolDB()),
-      m_show_demangled_names(Settings::Instance().IsShowDemangledNames())
+      m_ppc_symbol_db(m_system.GetPPCSymbolDB())
 {
   setWindowTitle(tr("Code"));
   setObjectName(QStringLiteral("code"));
 
-  setHidden(!Settings::Instance().IsCodeVisible() || !Config::IsDebuggingEnabled());
+  setHidden(!Settings::Instance().IsCodeVisible() || !Settings::Instance().IsDebugModeEnabled());
 
   setAllowedAreas(Qt::AllDockWidgetAreas);
 
@@ -73,9 +72,6 @@ CodeWidget::CodeWidget(QWidget* parent)
           [this](bool enabled) { setHidden(!enabled || !Settings::Instance().IsCodeVisible()); });
 
   connect(&Settings::Instance(), &Settings::EmulationStateChanged, this, &CodeWidget::Update);
-
-  connect(&Settings::Instance(), &Settings::ShowDemangledNamesChanged, this,
-          &CodeWidget::OnShowDemangledNamesChanged);
 
   ConnectWidgets();
 
@@ -250,17 +246,6 @@ void CodeWidget::OnBranchWatchDialog()
 void CodeWidget::OnSetCodeAddress(u32 address)
 {
   SetAddress(address, CodeViewWidget::SetAddressUpdate::WithDetailedUpdate);
-}
-
-void CodeWidget::OnShowDemangledNamesChanged()
-{
-  m_show_demangled_names = Settings::Instance().IsShowDemangledNames();
-  UpdateSymbols();
-  if (const Common::Symbol* symbol = m_ppc_symbol_db.GetSymbolFromAddr(m_code_view->GetAddress()))
-  {
-    UpdateFunctionCalls(symbol);
-    UpdateFunctionCallers(symbol);
-  }
 }
 
 void CodeWidget::OnPPCSymbolsChanged()
@@ -439,7 +424,7 @@ void CodeWidget::UpdateSymbols()
   m_symbols_list->clear();
 
   m_ppc_symbol_db.ForEachSymbol([&](const Common::Symbol& symbol) {
-    QString name = QString::fromStdString(GetSymbolDisplayName(&symbol));
+    QString name = QString::fromStdString(symbol.name);
 
     // If the symbol has an object name, add it to the entry name.
     if (!symbol.object_name.empty())
@@ -503,16 +488,15 @@ void CodeWidget::UpdateFunctionCalls(const Common::Symbol* symbol)
     if (call_symbol)
     {
       QString name;
-      const std::string& symbol_name = GetSymbolDisplayName(call_symbol);
 
       if (!call_symbol->object_name.empty())
       {
         name = QString::fromStdString(
-            fmt::format("< {} ({}, {:08x})", symbol_name, call_symbol->object_name, addr));
+            fmt::format("< {} ({}, {:08x})", call_symbol->name, call_symbol->object_name, addr));
       }
       else
       {
-        name = QString::fromStdString(fmt::format("< {} ({:08x})", symbol_name, addr));
+        name = QString::fromStdString(fmt::format("< {} ({:08x})", call_symbol->name, addr));
       }
 
       if (!name.contains(filter, Qt::CaseInsensitive))
@@ -541,16 +525,15 @@ void CodeWidget::UpdateFunctionCallers(const Common::Symbol* symbol)
     if (caller_symbol)
     {
       QString name;
-      const std::string& symbol_name = GetSymbolDisplayName(caller_symbol);
 
       if (!caller_symbol->object_name.empty())
       {
-        name = QString::fromStdString(
-            fmt::format("< {} ({}, {:08x})", symbol_name, caller_symbol->object_name, addr));
+        name = QString::fromStdString(fmt::format("< {} ({}, {:08x})", caller_symbol->name,
+                                                  caller_symbol->object_name, addr));
       }
       else
       {
-        name = QString::fromStdString(fmt::format("< {} ({:08x})", symbol_name, addr));
+        name = QString::fromStdString(fmt::format("< {} ({:08x})", caller_symbol->name, addr));
       }
 
       if (!name.contains(filter, Qt::CaseInsensitive))
@@ -561,13 +544,6 @@ void CodeWidget::UpdateFunctionCallers(const Common::Symbol* symbol)
       m_function_callers_list->addItem(item);
     }
   }
-}
-
-// Gets the name of this symbol based on the option for whether or not to show
-// demangled names.
-const std::string& CodeWidget::GetSymbolDisplayName(const Common::Symbol* symbol) const
-{
-  return symbol->GetDisplayName(m_show_demangled_names);
 }
 
 void CodeWidget::Step()
@@ -627,7 +603,7 @@ static bool WillInstructionReturn(Core::System& system, UGeckoInstruction inst)
   const auto& ppc_state = system.GetPPCState();
   bool counter = (inst.BO_2 >> 2 & 1) != 0 || (CTR(ppc_state) != 0) != ((inst.BO_2 >> 1 & 1) != 0);
   bool condition = inst.BO_2 >> 4 != 0 || ppc_state.cr.GetBit(inst.BI_2) == (inst.BO_2 >> 3 & 1);
-  bool isBclr = inst.OPCD_7 == 0b010011 && inst.XO == 16;
+  bool isBclr = inst.OPCD_7 == 0b010011 && (inst.hex >> 1 & 0b10000) != 0;
   return isBclr && counter && condition && !inst.LK_3;
 }
 

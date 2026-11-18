@@ -311,8 +311,8 @@ static u32 GetDestinationFactor(u8* srcClr, u8* dstClr, DstBlendFactor mode)
 
 static void BlendColor(u8* srcClr, u8* dstClr)
 {
-  u32 srcFactor = GetSourceFactor(srcClr, dstClr, bpmem.blendmode.src_factor);
-  u32 dstFactor = GetDestinationFactor(srcClr, dstClr, bpmem.blendmode.dst_factor);
+  u32 srcFactor = GetSourceFactor(srcClr, dstClr, bpmem.blendmode.srcfactor);
+  u32 dstFactor = GetDestinationFactor(srcClr, dstClr, bpmem.blendmode.dstfactor);
 
   for (int i = 0; i < 4; i++)
   {
@@ -397,7 +397,7 @@ static void SubtractBlend(u8* srcClr, u8* dstClr)
 
 static void Dither(u16 x, u16 y, u8* color)
 {
-  // No dithering for RGB8 mode
+  // No blending for RGB8 mode
   if (!bpmem.blendmode.dither || bpmem.zcontrol.pixel_format != PixelFormat::RGBA6_Z24)
     return;
 
@@ -416,16 +416,16 @@ void BlendTev(u16 x, u16 y, u8* color)
 
   u8* dstClrPtr = (u8*)&dstClr;
 
-  if (bpmem.blendmode.blend_enable)
+  if (bpmem.blendmode.blendenable)
   {
     if (bpmem.blendmode.subtract)
       SubtractBlend(color, dstClrPtr);
     else
       BlendColor(color, dstClrPtr);
   }
-  else if (bpmem.blendmode.logic_op_enable)
+  else if (bpmem.blendmode.logicopenable)
   {
-    LogicBlend(*((u32*)color), &dstClr, bpmem.blendmode.logic_mode);
+    LogicBlend(*((u32*)color), &dstClr, bpmem.blendmode.logicmode);
   }
   else
   {
@@ -435,15 +435,15 @@ void BlendTev(u16 x, u16 y, u8* color)
   if (bpmem.dstalpha.enable)
     dstClrPtr[ALP_C] = bpmem.dstalpha.alpha;
 
-  if (bpmem.blendmode.color_update)
+  if (bpmem.blendmode.colorupdate)
   {
     Dither(x, y, dstClrPtr);
-    if (bpmem.blendmode.alpha_update)
+    if (bpmem.blendmode.alphaupdate)
       SetPixelAlphaColor(offset, dstClrPtr);
     else
       SetPixelColorOnly(offset, dstClrPtr);
   }
-  else if (bpmem.blendmode.alpha_update)
+  else if (bpmem.blendmode.alphaupdate)
   {
     SetPixelAlphaOnly(offset, dstClrPtr[ALP_C]);
   }
@@ -452,14 +452,14 @@ void BlendTev(u16 x, u16 y, u8* color)
 void SetColor(u16 x, u16 y, u8* color)
 {
   u32 offset = GetColorOffset(x, y);
-  if (bpmem.blendmode.color_update)
+  if (bpmem.blendmode.colorupdate)
   {
-    if (bpmem.blendmode.alpha_update)
+    if (bpmem.blendmode.alphaupdate)
       SetPixelAlphaColor(offset, color);
     else
       SetPixelColorOnly(offset, color);
   }
-  else if (bpmem.blendmode.alpha_update)
+  else if (bpmem.blendmode.alphaupdate)
   {
     SetPixelAlphaOnly(offset, color[ALP_C]);
   }
@@ -467,7 +467,7 @@ void SetColor(u16 x, u16 y, u8* color)
 
 void SetDepth(u16 x, u16 y, u32 depth)
 {
-  if (bpmem.zmode.update_enable)
+  if (bpmem.zmode.updateenable)
     SetPixelDepth(GetDepthOffset(x, y), depth);
 }
 
@@ -702,7 +702,7 @@ bool ZCompare(u16 x, u16 y, u32 z)
     break;
   }
 
-  if (pass && bpmem.zmode.update_enable)
+  if (pass && bpmem.zmode.updateenable)
   {
     SetPixelDepth(offset, z);
   }
@@ -737,20 +737,19 @@ void IncPerfCounterQuadCount(PerfQueryType type)
 namespace SW
 {
 
-void SWEFBInterface::ReinterpretPixelData(FramebufferManager* framebuffer_manager,
-                                          EFBReinterpretType convtype)
+void SWEFBInterface::ReinterpretPixelData(EFBReinterpretType convtype)
 {
 }
 
-void SWEFBInterface::PokeColor(FramebufferManager* framebuffer_manager, u16 x, u16 y, u32 color)
+void SWEFBInterface::PokeColor(u16 x, u16 y, u32 color)
 {
 }
 
-void SWEFBInterface::PokeDepth(FramebufferManager* framebuffer_manager, u16 x, u16 y, u32 depth)
+void SWEFBInterface::PokeDepth(u16 x, u16 y, u32 depth)
 {
 }
 
-u32 SWEFBInterface::PeekColorInternal(FramebufferManager* framebuffer_manager, u16 x, u16 y)
+u32 SWEFBInterface::PeekColorInternal(u16 x, u16 y)
 {
   const u32 color = EfbInterface::GetColor(x, y);
 
@@ -760,7 +759,7 @@ u32 SWEFBInterface::PeekColorInternal(FramebufferManager* framebuffer_manager, u
   return value;
 }
 
-u32 SWEFBInterface::PeekDepthInternal(FramebufferManager* framebuffer_manager, u16 x, u16 y)
+u32 SWEFBInterface::PeekDepthInternal(u16 x, u16 y)
 {
   return EfbInterface::GetDepth(x, y);
 }

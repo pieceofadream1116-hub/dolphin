@@ -10,10 +10,10 @@ CachedInterpreterBlockCache::CachedInterpreterBlockCache(JitBase& jit) : JitBase
 {
 }
 
-bool CachedInterpreterBlockCache::Init()
+void CachedInterpreterBlockCache::Init()
 {
+  JitBaseBlockCache::Init();
   ClearRangesToFree();
-  return JitBaseBlockCache::Init();
 }
 
 void CachedInterpreterBlockCache::DestroyBlock(JitBlock& block)

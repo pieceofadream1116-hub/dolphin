@@ -8,8 +8,8 @@
 namespace VideoCommon
 {
 CustomAsset::CustomAsset(std::shared_ptr<CustomAssetLibrary> library,
-                         CustomAssetLibrary::AssetID asset_id, u64 asset_handle)
-    : m_owning_library(std::move(library)), m_asset_id(std::move(asset_id)), m_handle(asset_handle)
+                         const CustomAssetLibrary::AssetID& asset_id, u64 asset_handle)
+    : m_owning_library(std::move(library)), m_asset_id(asset_id), m_handle(asset_handle)
 {
 }
 

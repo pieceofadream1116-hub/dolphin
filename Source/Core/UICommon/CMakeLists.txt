@@ -26,7 +26,7 @@ PUBLIC
   common
   core
   cpp-optparse
-  MINIZIP::minizip-ng
+  minizip-ng::minizip-ng
   pugixml
 
 PRIVATE

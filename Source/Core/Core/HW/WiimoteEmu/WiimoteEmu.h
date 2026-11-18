@@ -11,11 +11,11 @@
 #include "Common/Common.h"
 #include "Common/Config/Config.h"
 
-#include "Core/HW/WiimoteCommon/WiimoteHid.h"
 #include "Core/HW/WiimoteCommon/WiimoteReport.h"
 
 #include "Core/HW/WiimoteEmu/Camera.h"
 #include "Core/HW/WiimoteEmu/Dynamics.h"
+#include "Core/HW/WiimoteEmu/Encryption.h"
 #include "Core/HW/WiimoteEmu/ExtensionPort.h"
 #include "Core/HW/WiimoteEmu/I2CBus.h"
 #include "Core/HW/WiimoteEmu/MotionPlus.h"
@@ -187,6 +187,8 @@ private:
   // This is the region exposed over bluetooth:
   static constexpr int EEPROM_FREE_SIZE = 0x1700;
 
+  void RefreshConfig();
+
   void StepDynamics();
   void UpdateButtonsStatus(const DesiredWiimoteState& target_state);
   void BuildDesiredWiimoteState(DesiredWiimoteState* target_state, SensorBarState sensor_bar_state);
@@ -346,5 +348,7 @@ private:
   PositionalState m_shake_state;
 
   IMUCursorState m_imu_cursor_state;
+
+  Config::ConfigChangedCallbackID m_config_changed_callback_id;
 };
 }  // namespace WiimoteEmu

@@ -17,7 +17,7 @@ class JitArm64BlockCache : public JitBaseBlockCache
 public:
   explicit JitArm64BlockCache(JitBase& jit);
 
-  [[nodiscard]] bool Init() override;
+  void Init() override;
 
   void DestroyBlock(JitBlock& block) override;
 

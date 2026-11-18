@@ -9,7 +9,6 @@
 #include "Core/CheatSearch.h"
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
-#include "Core/System.h"
 
 #include "DolphinQt/QtUtils/QtUtils.h"
 #include "DolphinQt/QtUtils/WrapInScrollArea.h"
@@ -34,8 +33,6 @@ CheatsManager::CheatsManager(Core::System& system, QWidget* parent)
   CreateWidgets();
   ConnectWidgets();
 
-  OnStateChanged(Core::GetState(system));
-
   QtUtils::AdjustSizeWithinScreen(this);
 
   auto& settings = Settings::GetQSettings();
@@ -57,26 +54,16 @@ void CheatsManager::OnStateChanged(Core::State state)
 
 void CheatsManager::OnFrameEnd()
 {
-  if (m_frame_end_update_queued.exchange(true))
+  if (!isVisible())
     return;
 
-  QMetaObject::invokeMethod(
-      this,
-      [this] {
-        m_frame_end_update_queued = false;
-
-        if (!isVisible())
-          return;
-
-        auto* const selected_cheat_search_widget =
-            qobject_cast<CheatSearchWidget*>(m_tab_widget->currentWidget());
-        if (selected_cheat_search_widget != nullptr)
-        {
-          selected_cheat_search_widget->UpdateTableVisibleCurrentValues(
-              CheatSearchWidget::UpdateSource::Auto);
-        }
-      },
-      Qt::QueuedConnection);
+  auto* const selected_cheat_search_widget =
+      qobject_cast<CheatSearchWidget*>(m_tab_widget->currentWidget());
+  if (selected_cheat_search_widget != nullptr)
+  {
+    selected_cheat_search_widget->UpdateTableVisibleCurrentValues(
+        CheatSearchWidget::UpdateSource::Auto);
+  }
 }
 
 void CheatsManager::UpdateAllCheatSearchWidgetCurrentValues()
@@ -91,8 +78,7 @@ void CheatsManager::UpdateAllCheatSearchWidgetCurrentValues()
 
 void CheatsManager::RegisterAfterFrameEventCallback()
 {
-  m_VI_end_field_event =
-      m_system.GetVideoEvents().vi_end_field_event.Register([this] { OnFrameEnd(); });
+  m_VI_end_field_event = VIEndFieldEvent::Register([this] { OnFrameEnd(); }, "CheatsManager");
 }
 
 void CheatsManager::RemoveAfterFrameEventCallback()

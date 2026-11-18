@@ -59,7 +59,7 @@ void NetPlayChatUI::Display()
   if (ImGui::InputText("##NetplayMessageBuffer", m_message_buf, IM_ARRAYSIZE(m_message_buf),
                        ImGuiInputTextFlags_EnterReturnsTrue))
   {
-    SendChatMessage();
+    SendMessage();
   }
 
   if (m_activate)
@@ -73,7 +73,7 @@ void NetPlayChatUI::Display()
   ImGui::SameLine();
 
   if (ImGui::Button("Send"))
-    SendChatMessage();
+    SendMessage();
 
   ImGui::End();
 }
@@ -90,7 +90,7 @@ void NetPlayChatUI::AppendChat(std::string message, Color color)
     m_scroll_to_bottom = true;
 }
 
-void NetPlayChatUI::SendChatMessage()
+void NetPlayChatUI::SendMessage()
 {
   // Check whether the input field is empty
   if (m_message_buf[0] != '\0')

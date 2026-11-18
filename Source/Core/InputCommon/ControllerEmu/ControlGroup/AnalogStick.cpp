@@ -3,12 +3,15 @@
 
 #include "InputCommon/ControllerEmu/ControlGroup/AnalogStick.h"
 
+#include <cmath>
 #include <optional>
 
 #include "Common/Common.h"
 #include "Common/MathUtil.h"
 
+#include "InputCommon/ControlReference/ControlReference.h"
 #include "InputCommon/ControllerEmu/Control/Control.h"
+#include "InputCommon/ControllerEmu/Control/Input.h"
 #include "InputCommon/ControllerEmu/ControllerEmu.h"
 #include "InputCommon/ControllerEmu/Setting/NumericSetting.h"
 
@@ -99,7 +102,7 @@ OctagonAnalogStick::OctagonAnalogStick(const char* name_, const char* ui_name_,
 
 ControlState OctagonAnalogStick::GetVirtualNotchSize() const
 {
-  return MathUtil::DegreesToRadians(m_virtual_notch_setting.GetValue());
+  return m_virtual_notch_setting.GetValue() * MathUtil::TAU / 360;
 }
 
 ControlState OctagonAnalogStick::GetGateRadiusAtAngle(double ang) const

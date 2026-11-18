@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <numbers>
 #include <ranges>
 
 #include <fmt/format.h>
@@ -35,7 +34,7 @@ std::optional<double> GetRayLineIntersection(Common::DVec2 ray, Common::DVec2 po
   const auto dot = diff.Dot({-ray.y, ray.x});
   if (std::abs(dot) < 0.00001)
   {
-    // Both points are on top of each other.
+    // Both points are on top of eachother.
     return std::nullopt;
   }
 
@@ -55,7 +54,7 @@ double GetNearestNotch(double angle, double virtual_notch_angle)
   constexpr auto rounding = MathUtil::TAU / sides;
   const auto closest_notch = std::round(angle / rounding) * rounding;
   const auto angle_diff =
-      std::fmod(angle - closest_notch + std::numbers::pi, MathUtil::TAU) - std::numbers::pi;
+      std::fmod(angle - closest_notch + MathUtil::PI, MathUtil::TAU) - MathUtil::PI;
   return std::abs(angle_diff) < virtual_notch_angle / 2 ? closest_notch : angle;
 }
 
@@ -81,12 +80,12 @@ OctagonStickGate::OctagonStickGate(ControlState radius) : m_radius(radius)
 ControlState OctagonStickGate::GetRadiusAtAngle(double angle) const
 {
   constexpr int sides = 8;
-  constexpr double sum_int_angles = (sides - 2) * std::numbers::pi;
+  constexpr double sum_int_angles = (sides - 2) * MathUtil::PI;
   constexpr double half_int_angle = sum_int_angles / sides / 2;
 
   angle = std::fmod(angle, MathUtil::TAU / sides);
   // Solve ASA triangle using The Law of Sines:
-  return m_radius / std::sin(std::numbers::pi - angle - half_int_angle) * std::sin(half_int_angle);
+  return m_radius / std::sin(MathUtil::PI - angle - half_int_angle) * std::sin(half_int_angle);
 }
 
 std::optional<u32> OctagonStickGate::GetIdealCalibrationSampleCount() const
@@ -170,7 +169,7 @@ ControlState ReshapableInput::GetCalibrationDataRadiusAtAngle(const CalibrationD
                              GetPointFromAngleAndLength(sample1_angle, data[sample1_index]),
                              GetPointFromAngleAndLength(sample2_angle, data[sample2_index]));
 
-  // Intersection has no value when points are on top of each other.
+  // Intersection has no value when points are on top of eachother.
   return intersection.value_or(data[sample1_index]);
 }
 
@@ -307,7 +306,7 @@ ReshapableInput::ReshapeData ReshapableInput::Reshape(ControlState x, ControlSta
   // (which depends on the signs of x and y) does not matter here as dist is zero
 
   // TODO: make the AtAngle functions work with negative angles:
-  ControlState angle = std::atan2(y, x) + MathUtil::TAU_v<ControlState>;
+  ControlState angle = std::atan2(y, x) + MathUtil::TAU;
 
   const ControlState input_max_dist = GetInputRadiusAtAngle(angle);
   ControlState gate_max_dist = GetGateRadiusAtAngle(angle);

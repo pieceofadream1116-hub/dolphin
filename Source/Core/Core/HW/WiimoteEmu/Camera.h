@@ -5,8 +5,9 @@
 
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
-#include "Common/Matrix.h"
+#include "Core/HW/WiimoteEmu/Dynamics.h"
 #include "Core/HW/WiimoteEmu/I2CBus.h"
+#include "InputCommon/ControllerEmu/ControlGroup/Cursor.h"
 
 namespace Common
 {
@@ -112,7 +113,7 @@ public:
   // Jordan: I calculate the FOV at 42 degrees horizontally and having a 4:3 aspect ratio.
   // This is 31.5 degrees vertically.
   static constexpr float CAMERA_AR = 4.f / 3;
-  static constexpr float CAMERA_FOV_X = MathUtil::DegreesToRadians(42.0f);
+  static constexpr float CAMERA_FOV_X = 42 * float(MathUtil::TAU) / 360;
   static constexpr float CAMERA_FOV_Y = CAMERA_FOV_X / CAMERA_AR;
 
   enum : u8

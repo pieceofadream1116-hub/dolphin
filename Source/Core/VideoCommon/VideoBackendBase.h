@@ -37,8 +37,8 @@ public:
   virtual bool Initialize(const WindowSystemInfo& wsi) = 0;
   virtual void Shutdown() = 0;
 
-  virtual std::string GetConfigName() const = 0;
-  virtual std::string GetDisplayName() const { return GetConfigName(); }
+  virtual std::string GetName() const = 0;
+  virtual std::string GetDisplayName() const { return GetName(); }
   virtual void InitBackendInfo(const WindowSystemInfo& wsi) = 0;
   virtual std::optional<std::string> GetWarningMessage() const { return {}; }
 
@@ -63,6 +63,7 @@ public:
 
   // Wrapper function which pushes the event to the GPU thread.
   void DoState(PointerWrap& p);
+  bool Initialized() { return m_initialized;  }
 
 protected:
   // For hardware backends

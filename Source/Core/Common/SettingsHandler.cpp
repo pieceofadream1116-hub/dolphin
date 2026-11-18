@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <ctime>
+#include <iomanip>
 #include <string>
 
 #include <fmt/chrono.h>

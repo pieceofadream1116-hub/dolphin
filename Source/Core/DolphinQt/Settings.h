@@ -11,9 +11,9 @@
 #include <QSettings>
 
 #include "Common/Config/Config.h"
-#include "Common/HookableEvent.h"
 #include "Core/Config/MainSettings.h"
 #include "DiscIO/Enums.h"
+#include "InputCommon/ControllerInterface/ControllerInterface.h"
 
 namespace Core
 {
@@ -66,12 +66,9 @@ public:
     Light = 1,
     Dark = 2,
     User = 3,
-    FusionLight = 4,
-    FusionDarkGray = 5,
-    FusionDark = 6,
 
     MinValue = 0,
-    MaxValue = 6,
+    MaxValue = 3,
   };
 
   void SetStyleType(StyleType type);
@@ -102,7 +99,7 @@ public:
   bool GetPreferredView() const;
   void SetPreferredView(bool list);
   QString GetDefaultGame() const;
-  void SetDefaultGame(const QString& path);
+  void SetDefaultGame(QString path);
   void RefreshGameList();
   void NotifyRefreshGameListStarted();
   void NotifyRefreshGameListComplete();
@@ -110,8 +107,6 @@ public:
   void ReloadTitleDB();
   bool IsAutoRefreshEnabled() const;
   void SetAutoRefreshEnabled(bool enabled);
-  bool IsGameCountVisible() const;
-  void SetGameCountVisible(bool visible);
 
   // Emulation
   int GetStateSlot() const;
@@ -154,6 +149,8 @@ public:
   bool GetCheatsEnabled() const;
 
   // Debug
+  void SetDebugModeEnabled(bool enabled);
+  bool IsDebugModeEnabled() const;
   void SetRegistersVisible(bool enabled);
   bool IsRegistersVisible() const;
   void SetThreadsVisible(bool enabled);
@@ -173,13 +170,15 @@ public:
   void SetAssemblerVisible(bool enabled);
   bool IsAssemblerVisible() const;
   QFont GetDebugFont() const;
-  void SetDebugFont(const QFont& font);
-  void SetShowDemangledNames(bool enabled);
-  bool IsShowDemangledNames() const;
+  void SetDebugFont(QFont font);
 
   // Auto-Update
   QString GetAutoUpdateTrack() const;
   void SetAutoUpdateTrack(const QString& mode);
+
+  // Fallback Region
+  DiscIO::Region GetFallbackRegion() const;
+  void SetFallbackRegion(const DiscIO::Region& region);
 
   // Analytics
   bool IsAnalyticsEnabled() const;
@@ -219,15 +218,15 @@ signals:
   void AssemblerVisibilityChanged(bool visible);
   void DebugModeToggled(bool enabled);
   void DebugFontChanged(const QFont& font);
-  void ShowDemangledNamesChanged(bool enabled);
   void AutoUpdateTrackChanged(const QString& mode);
+  void FallbackRegionChanged(const DiscIO::Region& region);
   void AnalyticsToggled(bool enabled);
   void ReleaseDevices();
   void DevicesChanged();
+  void SDCardInsertionChanged(bool inserted);
+  void USBKeyboardConnectionChanged(bool connected);
   void WiiSpeakMuteChanged(bool muted);
   void EnableGfxModsChanged(bool enabled);
-  void GameCountVisibilityChanged(bool visible);
-  void HardcoreModeChanged(bool enabled);
 
 private:
   Settings();
@@ -237,10 +236,8 @@ private:
 
   std::shared_ptr<NetPlay::NetPlayClient> m_client;
   std::shared_ptr<NetPlay::NetPlayServer> m_server;
-  Common::EventHook m_hotplug_event_hook;
+  ControllerInterface::HotplugCallbackHandle m_hotplug_callback_handle;
   Config::ConfigChangedCallbackID m_config_changed_callback_id;
-
-  Common::EventHook m_core_state_changed_hook;
 };
 
 Q_DECLARE_METATYPE(Core::State);

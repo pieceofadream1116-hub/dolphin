@@ -5,8 +5,9 @@
 
 #include <cstddef>
 
+#include <rangeset/rangesizeset.h>
+
 #include "Common/CommonTypes.h"
-#include "Common/RangeSizeSet.h"
 #include "Core/PowerPC/CachedInterpreter/CachedInterpreterBlockCache.h"
 #include "Core/PowerPC/CachedInterpreter/CachedInterpreterEmitter.h"
 #include "Core/PowerPC/JitCommon/JitBase.h"
@@ -32,7 +33,7 @@ public:
   CachedInterpreter& operator=(CachedInterpreter&&) = delete;
   ~CachedInterpreter() override;
 
-  [[nodiscard]] bool Init() override;
+  void Init() override;
   void Shutdown() override;
 
   bool HandleFault(uintptr_t access_address, SContext* ctx) override { return false; }
@@ -111,7 +112,7 @@ private:
   static s32 CheckIdle(PowerPC::PowerPCState& ppc_state, const CheckIdleOperands& operands);
   static s32 CheckIdle(std::ostream& stream, const CheckIdleOperands& operands);
 
-  Common::RangeSizeSet<u8*> m_free_ranges;
+  HyoutaUtilities::RangeSizeSet<u8*> m_free_ranges;
   CachedInterpreterBlockCache m_block_cache;
 };
 

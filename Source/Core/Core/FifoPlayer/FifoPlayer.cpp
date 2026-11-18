@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <mutex>
 #include <type_traits>
 
 #include "Common/Assert.h"
@@ -55,6 +56,11 @@ public:
   OPCODE_CALLBACK(void OnCommand(const u8* data, u32 size));
 
   OPCODE_CALLBACK(CPState& GetCPState()) { return m_cpmem; }
+
+  OPCODE_CALLBACK(u32 GetVertexSize(u8 vat))
+  {
+    return VertexLoaderBase::GetVertexSize(GetCPState().vtx_desc, GetCPState().vtx_attr[vat]);
+  }
 
   bool m_start_of_primitives = false;
   bool m_end_of_primitives = false;
@@ -217,7 +223,7 @@ public:
   ~CPUCore() override {}
   CPUCore& operator=(const CPUCore&) = delete;
 
-  bool Init() override
+  void Init() override
   {
     IsPlayingBackFifologWithBrokenEFBCopies = m_parent->m_File->HasBrokenEFBCopies();
     // Without this call, we deadlock in initialization in dual core, as the FIFO is disabled and
@@ -226,8 +232,6 @@ public:
 
     m_parent->m_CurrentFrame = m_parent->m_FrameRangeStart;
     m_parent->LoadMemory();
-
-    return true;
   }
 
   void Shutdown() override { IsPlayingBackFifologWithBrokenEFBCopies = false; }
@@ -316,7 +320,7 @@ void FifoPlayer::SetFileLoadedCallback(CallbackFunc callback)
 {
   m_FileLoadedCb = std::move(callback);
 
-  // Trigger the callback immediately if the file is already loaded.
+  // Trigger the callback immediatly if the file is already loaded.
   if (GetFile() != nullptr)
   {
     m_FileLoadedCb();
@@ -488,17 +492,14 @@ void FifoPlayer::WriteAllMemoryUpdates()
 void FifoPlayer::WriteMemory(const MemoryUpdate& memUpdate)
 {
   auto& memory = m_system.GetMemory();
+  u8* mem = nullptr;
 
-  const auto mem_span = memory.GetSpanForAddress(memUpdate.address);
+  if (memUpdate.address & 0x10000000)
+    mem = &memory.GetEXRAM()[memUpdate.address & memory.GetExRamMask()];
+  else
+    mem = &memory.GetRAM()[memUpdate.address & memory.GetRamMask()];
 
-  if (memUpdate.data.size() > mem_span.size())
-  {
-    ERROR_LOG_FMT(CORE, "WriteMemory overflow: address=0x{:08x} length={} span={}",
-                  memUpdate.address, memUpdate.data.size(), mem_span.size());
-    return;
-  }
-
-  std::ranges::copy(memUpdate.data, mem_span.data());
+  std::ranges::copy(memUpdate.data, mem);
 }
 
 void FifoPlayer::WriteFifo(const u8* data, u32 start, u32 end)
@@ -648,7 +649,7 @@ void FifoPlayer::LoadMemory()
     HID4(ppc_state).SBE = 1;
   }
 
-  m_system.GetPowerPC().MSRUpdated();
+  PowerPC::MSRUpdated(ppc_state);
 
   auto& mmu = m_system.GetMMU();
   mmu.DBATUpdated();
@@ -710,12 +711,12 @@ void FifoPlayer::LoadTextureMemory()
 
 void FifoPlayer::WriteCP(u32 address, u16 value)
 {
-  m_system.GetMMU().Write<u16>(value, 0xCC000000 | address);
+  m_system.GetMMU().Write_U16(value, 0xCC000000 | address);
 }
 
 void FifoPlayer::WritePI(u32 address, u32 value)
 {
-  m_system.GetMMU().Write<u32>(value, 0xCC003000 | address);
+  m_system.GetMMU().Write_U32(value, 0xCC003000 | address);
 }
 
 void FifoPlayer::FlushWGP()
@@ -814,13 +815,13 @@ bool FifoPlayer::ShouldLoadXF(u8 reg)
 bool FifoPlayer::IsIdleSet() const
 {
   CommandProcessor::UCPStatusReg status =
-      m_system.GetMMU().Read<u16>(0xCC000000 | CommandProcessor::STATUS_REGISTER);
+      m_system.GetMMU().Read_U16(0xCC000000 | CommandProcessor::STATUS_REGISTER);
   return status.CommandIdle;
 }
 
 bool FifoPlayer::IsHighWatermarkSet() const
 {
   CommandProcessor::UCPStatusReg status =
-      m_system.GetMMU().Read<u16>(0xCC000000 | CommandProcessor::STATUS_REGISTER);
+      m_system.GetMMU().Read_U16(0xCC000000 | CommandProcessor::STATUS_REGISTER);
   return status.OverflowHiWatermark;
 }

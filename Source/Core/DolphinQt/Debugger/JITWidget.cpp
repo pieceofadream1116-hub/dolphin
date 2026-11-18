@@ -20,6 +20,7 @@
 #include <QTableView>
 #include <QVBoxLayout>
 
+#include <fmt/format.h>
 #include <fmt/ostream.h>
 
 #include "Common/CommonFuncs.h"
@@ -285,7 +286,7 @@ void JITWidget::LoadQSettings()
   auto& settings = Settings::GetQSettings();
 
   restoreGeometry(settings.value(QStringLiteral("jitwidget/geometry")).toByteArray());
-  setHidden(!Settings::Instance().IsJITVisible() || !Config::IsDebuggingEnabled());
+  setHidden(!Settings::Instance().IsJITVisible() || !Settings::Instance().IsDebugModeEnabled());
   // macOS: setFloating() needs to be after setHidden() for proper window presentation
   // according to Settings
   setFloating(settings.value(QStringLiteral("jitwidget/floating")).toBool());

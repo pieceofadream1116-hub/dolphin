@@ -13,13 +13,11 @@
 #include <span>
 #include <utility>
 
-#include "Common/Align.h"
 #include "Common/CommonTypes.h"
 #include "Common/JitRegister.h"
 #include "Core/Config/MainSettings.h"
 #include "Core/Core.h"
 #include "Core/Host.h"
-#include "Core/PowerPC/Gekko.h"
 #include "Core/PowerPC/JitCommon/JitBase.h"
 #include "Core/PowerPC/MMU.h"
 #include "Core/PowerPC/PPCSymbolDB.h"
@@ -33,7 +31,8 @@ using namespace Gen;
 
 bool JitBlock::OverlapsPhysicalRange(u32 address, u32 length) const
 {
-  return physical_addresses.overlaps(address, address + length);
+  return physical_addresses.lower_bound(address) !=
+         physical_addresses.lower_bound(address + length);
 }
 
 void JitBlock::ProfileData::BeginProfiling(ProfileData* data)
@@ -54,14 +53,8 @@ JitBaseBlockCache::JitBaseBlockCache(JitBase& jit) : m_jit{jit}
 
 JitBaseBlockCache::~JitBaseBlockCache() = default;
 
-bool JitBaseBlockCache::Init()
+void JitBaseBlockCache::Init()
 {
-  if (!valid_block.IsValid())
-  {
-    ERROR_LOG_FMT(DYNA_REC, "Failed to create valid_block");
-    return false;
-  }
-
   Common::JitRegister::Init(Config::Get(Config::MAIN_PERF_MAP_DIR));
 
   m_entry_points_ptr = nullptr;
@@ -71,8 +64,6 @@ bool JitBaseBlockCache::Init()
 #endif
 
   Clear();
-
-  return true;
 }
 
 void JitBaseBlockCache::Shutdown()
@@ -89,9 +80,9 @@ void JitBaseBlockCache::Clear()
 #if defined(_DEBUG) || defined(DEBUGFAST)
   Core::DisplayMessage("Clearing code cache.", 3000);
 #endif
-  m_jit.js.fifoWriteAddresses.Clear();
-  m_jit.js.pairedQuantizeAddresses.Clear();
-  m_jit.js.noSpeculativeConstantsAddresses.Clear();
+  m_jit.js.fifoWriteAddresses.clear();
+  m_jit.js.pairedQuantizeAddresses.clear();
+  m_jit.js.noSpeculativeConstantsAddresses.clear();
   for (auto& e : block_map)
   {
     DestroyBlock(e.second);
@@ -100,16 +91,16 @@ void JitBaseBlockCache::Clear()
   links_to.clear();
   block_range_map.clear();
 
-  valid_block.Clear();
+  valid_block.ClearAll();
 
   if (m_entry_points_ptr)
     m_entry_points_arena.Clear();
 }
 
-bool JitBaseBlockCache::Reset()
+void JitBaseBlockCache::Reset()
 {
   Shutdown();
-  return Init();
+  Init();
 }
 
 u8** JitBaseBlockCache::GetEntryPoints()
@@ -123,7 +114,7 @@ JitBlock** JitBaseBlockCache::GetFastBlockMapFallback()
 }
 
 void JitBaseBlockCache::RunOnBlocks(const Core::CPUThreadGuard&,
-                                    const std::function<void(const JitBlock&)>& f) const
+                                    std::function<void(const JitBlock&)> f) const
 {
   for (const auto& e : block_map)
     f(e.second);
@@ -180,13 +171,10 @@ void JitBaseBlockCache::FinalizeBlock(JitBlock& block, bool block_link,
                                  original_buffer_transform_view.end());
   }
 
-  for (auto [range_start, range_end] : block.physical_addresses)
+  for (u32 addr : block.physical_addresses)
   {
-    valid_block.SetBits(range_start / VALID_BLOCK_CACHE_LINE_SIZE,
-                        Common::DivideRoundingUp(range_end, VALID_BLOCK_CACHE_LINE_SIZE));
-
-    for (u32 i = range_start & BLOCK_RANGE_MAP_MASK; i < range_end; i += BLOCK_RANGE_SIZE)
-      block_range_map[i].insert(&block);
+    valid_block.Set(addr / 32);
+    block_range_map[addr & BLOCK_RANGE_MAP_MASK].insert(&block);
   }
 
   if (block_link)
@@ -321,19 +309,20 @@ void JitBaseBlockCache::InvalidateICacheInternal(u32 physical_address, u32 addre
   bool destroy_block = true;
   if (length == 32 && (physical_address & 0x1fu) == 0)
   {
-    if (!valid_block.TestBit(physical_address / VALID_BLOCK_CACHE_LINE_SIZE))
+    if (!valid_block.Test(physical_address / 32))
       destroy_block = false;
     else
-      valid_block.ClearBit(physical_address / VALID_BLOCK_CACHE_LINE_SIZE);
+      valid_block.Clear(physical_address / 32);
   }
   else if (length > 32)
   {
     // Even if we can't check the set for optimization, we still want to remove all fully covered
     // cache lines from the valid_block set so that later calls don't try to invalidate already
     // cleared regions.
-    const u32 covered_block_start = (physical_address + 0x1f) / VALID_BLOCK_CACHE_LINE_SIZE;
-    const u32 covered_block_end = (physical_address + length) / VALID_BLOCK_CACHE_LINE_SIZE;
-    valid_block.ClearBits(covered_block_start, covered_block_end);
+    const u32 covered_block_start = (physical_address + 0x1f) / 32;
+    const u32 covered_block_end = (physical_address + length) / 32;
+    for (u32 i = covered_block_start; i < covered_block_end; ++i)
+      valid_block.Clear(i);
   }
 
   if (destroy_block)
@@ -347,11 +336,12 @@ void JitBaseBlockCache::InvalidateICacheInternal(u32 physical_address, u32 addre
     // being in the right place between instructions).
     if (!forced)
     {
-      const size_t start_bit = address / sizeof(UGeckoInstruction);
-      const size_t end_bit = (address + length) / sizeof(UGeckoInstruction);
-      m_jit.js.fifoWriteAddresses.ClearBits(start_bit, end_bit);
-      m_jit.js.pairedQuantizeAddresses.ClearBits(start_bit, end_bit);
-      m_jit.js.noSpeculativeConstantsAddresses.ClearBits(start_bit, end_bit);
+      for (u32 i = address; i < address + length; i += 4)
+      {
+        m_jit.js.fifoWriteAddresses.erase(i);
+        m_jit.js.pairedQuantizeAddresses.erase(i);
+        m_jit.js.noSpeculativeConstantsAddresses.erase(i);
+      }
     }
   }
 }
@@ -372,15 +362,9 @@ void JitBaseBlockCache::ErasePhysicalRange(u32 address, u32 length)
       {
         // If the block overlaps, also remove all other occupied slots in the other macro blocks.
         // This will leak empty macro blocks, but they may be reused or cleared later on.
-        for (auto [range_start, range_end] : block->physical_addresses)
-        {
-          DEBUG_ASSERT(range_start != range_end);
-          for (u32 i = range_start & BLOCK_RANGE_MAP_MASK; i < range_end; i += BLOCK_RANGE_SIZE)
-          {
-            if (i != start->first)
-              block_range_map[i].erase(block);
-          }
-        }
+        for (u32 addr : block->physical_addresses)
+          if ((addr & BLOCK_RANGE_MAP_MASK) != start->first)
+            block_range_map[addr & BLOCK_RANGE_MAP_MASK].erase(block);
 
         // And remove the block.
         DestroyBlock(*block);
@@ -420,19 +404,16 @@ void JitBaseBlockCache::EraseSingleBlock(const JitBlock& block)
 
   JitBlock& mutable_block = block_map_iter->second;
 
-  for (auto [range_start, range_end] : mutable_block.physical_addresses)
-  {
-    for (u32 i = range_start & BLOCK_RANGE_MAP_MASK; i < range_end; i += BLOCK_RANGE_SIZE)
-      block_range_map[i].erase(&mutable_block);
-  }
+  for (const u32 addr : mutable_block.physical_addresses)
+    block_range_map[addr & BLOCK_RANGE_MAP_MASK].erase(&mutable_block);
 
   DestroyBlock(mutable_block);
   block_map.erase(block_map_iter);  // The original JitBlock reference is now dangling.
 }
 
-const u32* JitBaseBlockCache::GetBlockBitSet() const
+u32* JitBaseBlockCache::GetBlockBitSet() const
 {
-  return valid_block.GetRawMemory();
+  return valid_block.m_valid_block.get();
 }
 
 void JitBaseBlockCache::WriteDestroyBlock(const JitBlock& block)

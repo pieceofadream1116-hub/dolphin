@@ -505,20 +505,12 @@ void DSPManager::Do_ARAM_DMA()
     }
     else if (!m_aram.wii_mode)
     {
-      auto* mm_ptr = memory.GetPointerForRange(m_aram_dma.MMAddr, m_aram_dma.Cnt.count);
-      if (mm_ptr != nullptr)
+      while (m_aram_dma.Cnt.count)
       {
-        auto& hsp = m_system.GetHSP();
-        while (m_aram_dma.Cnt.count)
-        {
-          hsp.Read(m_aram_dma.ARAddr,
-                   std::span<u8, HSP::TRANSFER_SIZE>(mm_ptr, HSP::TRANSFER_SIZE));
-
-          m_aram_dma.MMAddr += HSP::TRANSFER_SIZE;
-          m_aram_dma.ARAddr += HSP::TRANSFER_SIZE;
-          m_aram_dma.Cnt.count -= HSP::TRANSFER_SIZE;
-          mm_ptr += HSP::TRANSFER_SIZE;
-        }
+        memory.Write_U64(m_system.GetHSP().Read(m_aram_dma.ARAddr), m_aram_dma.MMAddr);
+        m_aram_dma.MMAddr += 8;
+        m_aram_dma.ARAddr += 8;
+        m_aram_dma.Cnt.count -= 8;
       }
     }
   }
@@ -565,20 +557,13 @@ void DSPManager::Do_ARAM_DMA()
     }
     else if (!m_aram.wii_mode)
     {
-      auto* mm_ptr = memory.GetPointerForRange(m_aram_dma.MMAddr, m_aram_dma.Cnt.count);
-      if (mm_ptr != nullptr)
+      while (m_aram_dma.Cnt.count)
       {
-        auto& hsp = m_system.GetHSP();
-        while (m_aram_dma.Cnt.count)
-        {
-          hsp.Write(m_aram_dma.ARAddr,
-                    std::span<const u8, HSP::TRANSFER_SIZE>(mm_ptr, HSP::TRANSFER_SIZE));
+        m_system.GetHSP().Write(m_aram_dma.ARAddr, memory.Read_U64(m_aram_dma.MMAddr));
 
-          m_aram_dma.MMAddr += HSP::TRANSFER_SIZE;
-          m_aram_dma.ARAddr += HSP::TRANSFER_SIZE;
-          m_aram_dma.Cnt.count -= HSP::TRANSFER_SIZE;
-          mm_ptr += HSP::TRANSFER_SIZE;
-        }
+        m_aram_dma.MMAddr += 8;
+        m_aram_dma.ARAddr += 8;
+        m_aram_dma.Cnt.count -= 8;
       }
     }
   }
@@ -616,11 +601,6 @@ void DSPManager::WriteARAM(u8 value, u32 address)
 u8* DSPManager::GetARAMPtr() const
 {
   return m_aram.ptr;
-}
-
-u32 DSPManager::GetARAMSize() const
-{
-  return m_aram.size;
 }
 
 }  // end of namespace DSP

@@ -18,7 +18,7 @@ public:
   void Hide();
 
 signals:
-  void Search(const QString& search);
+  void Search(const QString& serach);
 
 private:
   void CreateWidgets();

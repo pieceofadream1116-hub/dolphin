@@ -383,14 +383,11 @@ void Metal::StateTracker::EndRenderPass()
 
 void Metal::StateTracker::FlushEncoders()
 {
-  const bool needs_submit = m_current_render_cmdbuf;
-  if (needs_submit)
-  {
-    EndRenderPass();
-    for (int i = 0; i <= static_cast<int>(UploadBuffer::Last); ++i)
-      Sync(m_upload_buffers[i]);
-  }
-
+  if (!m_current_render_cmdbuf)
+    return;
+  EndRenderPass();
+  for (int i = 0; i <= static_cast<int>(UploadBuffer::Last); ++i)
+    Sync(m_upload_buffers[i]);
   if (!m_manual_buffer_upload)
   {
     ASSERT(!m_upload_cmdbuf && "Should never be used!");
@@ -410,10 +407,6 @@ void Metal::StateTracker::FlushEncoders()
     m_texture_upload_encoder = nullptr;
     m_texture_upload_cmdbuf = nullptr;
   }
-
-  if (!needs_submit)
-    return;
-
   [m_current_render_cmdbuf
       addCompletedHandler:[backref = m_backref, draw = m_current_draw,
                            q = std::move(m_current_perf_query)](id<MTLCommandBuffer> buf) {
@@ -898,7 +891,7 @@ void Metal::StateTracker::PrepareCompute()
   {
     m_dirty_textures &= ~pipe->GetTextures();
     // Since there's two sets of textures, it's likely there'll be a few in each
-    // Check each set separately to avoid doing too many unnecessary bindings
+    // Check each set separately to avoid doing too many unneccessary bindings
     constexpr u32 lo_mask = (1 << VideoCommon::MAX_COMPUTE_SHADER_SAMPLERS) - 1;
     if (u32 lo = dirty & lo_mask)
     {

@@ -13,12 +13,16 @@
 #include "Common/Assert.h"
 #include "Common/GL/GLContext.h"
 #include "Common/GL/GLExtensions/GLExtensions.h"
+#include "Common/Logging/LogManager.h"
 #include "Common/MsgHandler.h"
+
+#include "Core/Config/GraphicsSettings.h"
 
 #include "VideoBackends/OGL/OGLTexture.h"
 
 #include "VideoCommon/DriverDetails.h"
 #include "VideoCommon/FramebufferManager.h"
+#include "VideoCommon/OnScreenDisplay.h"
 #include "VideoCommon/VideoConfig.h"
 
 namespace OGL
@@ -49,11 +53,11 @@ void InitDriverInfo()
   {
     vendor = DriverDetails::VENDOR_ATI;
   }
-  else if (sversion.contains("Mesa"))
+  else if (sversion.find("Mesa") != std::string::npos)
   {
     vendor = DriverDetails::VENDOR_MESA;
   }
-  else if (svendor.contains("Intel"))
+  else if (svendor.find("Intel") != std::string::npos)
   {
     vendor = DriverDetails::VENDOR_INTEL;
   }
@@ -117,12 +121,13 @@ void InitDriverInfo()
     else if (svendor == "Intel Open Source Technology Center")
     {
       driver = DriverDetails::DRIVER_I965;
-      if (srenderer.contains("Sandybridge"))
+      if (srenderer.find("Sandybridge") != std::string::npos)
         family = DriverDetails::Family::INTEL_SANDY;
-      else if (srenderer.contains("Ivybridge"))
+      else if (srenderer.find("Ivybridge") != std::string::npos)
         family = DriverDetails::Family::INTEL_IVY;
     }
-    else if (srenderer.contains("AMD") || srenderer.contains("ATI"))
+    else if (srenderer.find("AMD") != std::string::npos ||
+             srenderer.find("ATI") != std::string::npos)
     {
       driver = DriverDetails::DRIVER_R600;
     }
@@ -269,7 +274,7 @@ bool PopulateConfig(GLContext* m_main_gl_context)
 
     if (!GLExtensions::Supports("GL_ARB_sampler_objects"))
     {
-      // Our sampler cache uses this extension. It could easily be workaround and it's by far the
+      // Our sampler cache uses this extension. It could easyly be workaround and it's by far the
       // highest requirement, but it seems that no driver lacks support for it.
       PanicAlertFmtT("GPU: OGL ERROR: Need GL_ARB_sampler_objects.\n"
                      "GPU: Does your video card support OpenGL 3.3?");
@@ -718,6 +723,18 @@ bool PopulateConfig(GLContext* m_main_gl_context)
 
   g_Config.VerifyValidity();
   UpdateActiveConfig();
+
+  OSD::AddMessage(fmt::format("Video Info: {}, {}, {}", g_ogl_config.gl_vendor,
+                              g_ogl_config.gl_renderer, g_ogl_config.gl_version),
+                  5000);
+
+  if (!g_ogl_config.bSupportsGLBufferStorage && !g_ogl_config.bSupportsGLPinnedMemory)
+  {
+    OSD::AddMessage(fmt::format("Your OpenGL driver does not support {}_buffer_storage.",
+                                m_main_gl_context->IsGLES() ? "EXT" : "ARB"),
+                    60000);
+    OSD::AddMessage("This device's performance may be poor.", 60000);
+  }
 
   INFO_LOG_FMT(VIDEO, "Video Info: {}, {}, {}", g_ogl_config.gl_vendor, g_ogl_config.gl_renderer,
                g_ogl_config.gl_version);

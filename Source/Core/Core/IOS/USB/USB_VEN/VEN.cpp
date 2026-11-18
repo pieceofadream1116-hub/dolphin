@@ -16,15 +16,21 @@
 
 namespace IOS::HLE
 {
+constexpr u32 USBV5_VERSION = 0x50001;
+
 USB_VEN::~USB_VEN() = default;
 
 std::optional<IPCReply> USB_VEN::IOCtl(const IOCtlRequest& request)
 {
+  auto& system = GetSystem();
+  auto& memory = system.GetMemory();
+
   request.Log(GetDeviceName(), Common::Log::LogType::IOS_USB);
   switch (request.request)
   {
   case USB::IOCTL_USBV5_GETVERSION:
-    return GetUSBVersion(request);
+    memory.Write_U32(USBV5_VERSION, request.buffer_out);
+    return IPCReply(IPC_SUCCESS);
   case USB::IOCTL_USBV5_GETDEVICECHANGE:
     return GetDeviceChange(request);
   case USB::IOCTL_USBV5_SHUTDOWN:

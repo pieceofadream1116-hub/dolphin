@@ -43,7 +43,7 @@ public:
 
   void TransitionToState(D3D12_RESOURCE_STATES state) const;
 
-  // Destroys the resource backing this texture. The resource must not be in use by the GPU.
+  // Destoys the resource backing this texture. The resource must not be in use by the GPU.
   void DestroyResource();
 
 private:

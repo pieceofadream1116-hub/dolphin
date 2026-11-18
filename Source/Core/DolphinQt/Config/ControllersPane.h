@@ -13,6 +13,9 @@ class ControllersPane final : public QWidget
 public:
   ControllersPane();
 
+protected:
+  void showEvent(QShowEvent* event) override;
+
 private:
   void CreateMainLayout();
 

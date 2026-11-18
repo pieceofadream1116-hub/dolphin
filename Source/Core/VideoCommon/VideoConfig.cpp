@@ -20,7 +20,6 @@
 
 #include "VideoCommon/AbstractGfx.h"
 #include "VideoCommon/BPFunctions.h"
-#include "VideoCommon/BPMemory.h"
 #include "VideoCommon/DriverDetails.h"
 #include "VideoCommon/Fifo.h"
 #include "VideoCommon/FramebufferManager.h"
@@ -31,14 +30,12 @@
 #include "VideoCommon/ShaderGenCommon.h"
 #include "VideoCommon/TextureCacheBase.h"
 #include "VideoCommon/VertexManagerBase.h"
-#include "VideoCommon/XFMemory.h"
 
 VideoConfig g_Config;
 VideoConfig g_ActiveConfig;
 BackendInfo g_backend_info;
 static std::optional<CPUThreadConfigCallback::ConfigChangedCallbackID>
     s_config_changed_callback_id = std::nullopt;
-static Common::EventHook s_check_config_event;
 
 static bool IsVSyncActive(bool enabled)
 {
@@ -67,13 +64,13 @@ void VideoConfig::Refresh()
 
       const bool lock_gpu_thread = Core::IsRunning(system);
       if (lock_gpu_thread)
-        system.GetFifo().PauseAndLock();
+        system.GetFifo().PauseAndLock(true, false);
 
       g_Config.Refresh();
       g_Config.VerifyValidity();
 
       if (lock_gpu_thread)
-        system.GetFifo().RestoreState(true);
+        system.GetFifo().PauseAndLock(false, true);
     };
 
     s_config_changed_callback_id =
@@ -98,12 +95,7 @@ void VideoConfig::Refresh()
       Config::Get(Config::GFX_WIDESCREEN_HEURISTIC_STANDARD_RATIO);
   widescreen_heuristic_widescreen_ratio =
       Config::Get(Config::GFX_WIDESCREEN_HEURISTIC_WIDESCREEN_RATIO);
-  bCropToAspectRatio = Config::Get(Config::GFX_CROP_TO_ASPECT_RATIO);
-  bCropCustom = Config::Get(Config::GFX_CROP_CUSTOM);
-  iCropCustomLeft = Config::Get(Config::GFX_CROP_CUSTOM_LEFT);
-  iCropCustomTop = Config::Get(Config::GFX_CROP_CUSTOM_TOP);
-  iCropCustomRight = Config::Get(Config::GFX_CROP_CUSTOM_RIGHT);
-  iCropCustomBottom = Config::Get(Config::GFX_CROP_CUSTOM_BOTTOM);
+  bCrop = Config::Get(Config::GFX_CROP);
   iSafeTextureCache_ColorSamples = Config::Get(Config::GFX_SAFE_TEXTURE_CACHE_COLOR_SAMPLES);
   bShowFPS = Config::Get(Config::GFX_SHOW_FPS);
   bShowFTimes = Config::Get(Config::GFX_SHOW_FTIMES);
@@ -117,7 +109,6 @@ void VideoConfig::Refresh()
   bOverlayStats = Config::Get(Config::GFX_OVERLAY_STATS);
   bOverlayProjStats = Config::Get(Config::GFX_OVERLAY_PROJ_STATS);
   bOverlayScissorStats = Config::Get(Config::GFX_OVERLAY_SCISSOR_STATS);
-  bShowInternalResolution = Config::Get(Config::GFX_SHOW_INTERNAL_RESOLUTION);
   bDumpTextures = Config::Get(Config::GFX_DUMP_TEXTURES);
   bDumpMipmapTextures = Config::Get(Config::GFX_DUMP_MIP_TEXTURES);
   bDumpBaseTextures = Config::Get(Config::GFX_DUMP_BASE_TEXTURES);
@@ -168,18 +159,17 @@ void VideoConfig::Refresh()
 
   stereo_mode = Config::Get(Config::GFX_STEREO_MODE);
   stereo_per_eye_resolution_full = Config::Get(Config::GFX_STEREO_PER_EYE_RESOLUTION_FULL);
-  stereo_depth = Config::Get(Config::GFX_STEREO_DEPTH) *
-                 Config::Get(Config::GFX_STEREO_DEPTH_PERCENTAGE) * 0.00001f;
-  stereo_convergence = Config::Get(Config::GFX_STEREO_CONVERGENCE) *
-                       Config::Get(Config::GFX_STEREO_CONVERGENCE_PERCENTAGE) * 0.01f;
+  iStereoDepth = Config::Get(Config::GFX_STEREO_DEPTH);
+  iStereoConvergencePercentage = Config::Get(Config::GFX_STEREO_CONVERGENCE_PERCENTAGE);
   bStereoSwapEyes = Config::Get(Config::GFX_STEREO_SWAP_EYES);
+  iStereoConvergence = Config::Get(Config::GFX_STEREO_CONVERGENCE);
   bStereoEFBMonoDepth = Config::Get(Config::GFX_STEREO_EFB_MONO_DEPTH);
+  iStereoDepthPercentage = Config::Get(Config::GFX_STEREO_DEPTH_PERCENTAGE);
 
   bEFBAccessEnable = Config::Get(Config::GFX_HACK_EFB_ACCESS_ENABLE);
   bEFBAccessDeferInvalidation = Config::Get(Config::GFX_HACK_EFB_DEFER_INVALIDATION);
   bBBoxEnable = Config::Get(Config::GFX_HACK_BBOX_ENABLE);
   bSkipEFBCopyToRam = Config::Get(Config::GFX_HACK_SKIP_EFB_COPY_TO_RAM);
-  uSkipEFBCopyToRamClearByte = Config::Get(Config::GFX_HACK_SKIP_EFB_COPY_TO_RAM_CLEAR_BYTE);
   bSkipXFBCopyToRam = Config::Get(Config::GFX_HACK_SKIP_XFB_COPY_TO_RAM);
   bDisableCopyToVRAM = Config::Get(Config::GFX_HACK_DISABLE_COPY_TO_VRAM);
   bDeferEFBCopies = Config::Get(Config::GFX_HACK_DEFER_EFB_COPIES);
@@ -226,16 +216,8 @@ void VideoConfig::VerifyValidity()
   }
 }
 
-void VideoConfig::Init()
-{
-  s_check_config_event =
-      GetVideoEvents().after_frame_event.Register([](Core::System&) { CheckForConfigChanges(); });
-}
-
 void VideoConfig::Shutdown()
 {
-  s_check_config_event.reset();
-
   if (!s_config_changed_callback_id.has_value())
     return;
 
@@ -312,9 +294,10 @@ void CheckForConfigChanges()
   const auto old_hdr = g_ActiveConfig.bHDR;
 
   UpdateActiveConfig();
+  FreeLook::UpdateActiveConfig();
   g_vertex_manager->OnConfigChange();
 
-  g_freelook_camera.RefreshConfig();
+  g_freelook_camera.SetControlType(FreeLook::GetActiveConfig().camera_config.control_type);
 
   if (g_ActiveConfig.bGraphicMods && !old_graphics_mods_enabled)
   {
@@ -375,7 +358,7 @@ void CheckForConfigChanges()
   if (changed_bits & (CONFIG_CHANGE_BIT_MULTISAMPLES | CONFIG_CHANGE_BIT_STEREO_MODE |
                       CONFIG_CHANGE_BIT_TARGET_SIZE | CONFIG_CHANGE_BIT_HDR))
   {
-    g_framebuffer_manager->RecreateEFBFramebuffer(g_ActiveConfig.iEFBScale);
+    g_framebuffer_manager->RecreateEFBFramebuffer();
   }
 
   if (old_scale != g_framebuffer_manager->GetEFBScale())
@@ -391,6 +374,7 @@ void CheckForConfigChanges()
     OSD::AddMessage("Video config changed, reloading shaders.", OSD::Duration::NORMAL);
     g_gfx->WaitForGPUIdle();
     g_vertex_manager->InvalidatePipelineObject();
+    g_vertex_manager->NotifyCustomShaderCacheOfHostChange(new_host_config);
     g_shader_cache->SetHostConfig(new_host_config);
     g_shader_cache->Reload();
     g_framebuffer_manager->RecompileShaders();
@@ -399,12 +383,14 @@ void CheckForConfigChanges()
   // Viewport and scissor rect have to be reset since they will be scaled differently.
   if (changed_bits & CONFIG_CHANGE_BIT_TARGET_SIZE)
   {
-    BPFunctions::SetScissorAndViewport(g_framebuffer_manager.get(), bpmem.scissorTL,
-                                       bpmem.scissorBR, bpmem.scissorOffset, xfmem.viewport);
+    BPFunctions::SetScissorAndViewport();
   }
 
   // Notify all listeners
-  GetVideoEvents().config_changed_event.Trigger(changed_bits);
+  ConfigChangedEvent::Trigger(changed_bits);
 
   // TODO: Move everything else to the ConfigChanged event
 }
+
+static Common::EventHook s_check_config_event = AfterFrameEvent::Register(
+    [](Core::System&) { CheckForConfigChanges(); }, "CheckForConfigChanges");

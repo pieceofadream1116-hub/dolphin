@@ -21,8 +21,8 @@ void JitArm64::sc(UGeckoInstruction inst)
   INSTRUCTION_START
   JITDISABLE(bJITBranchOff);
 
-  gpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
-  fpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
+  gpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
+  fpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
 
   {
     auto WA = gpr.GetScopedReg();
@@ -39,8 +39,8 @@ void JitArm64::rfi(UGeckoInstruction inst)
   INSTRUCTION_START
   JITDISABLE(bJITBranchOff);
 
-  gpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
-  fpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
+  gpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
+  fpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
 
   // See Interpreter rfi for details
   const u32 mask = 0x87C0FFFF;
@@ -75,35 +75,67 @@ void JitArm64::rfi(UGeckoInstruction inst)
 }
 
 template <bool condition>
-void JitArm64::WriteBranchWatch(u32 origin, u32 destination, UGeckoInstruction inst,
-                                BitSet32 gpr_caller_save, BitSet32 fpr_caller_save)
+void JitArm64::WriteBranchWatch(u32 origin, u32 destination, UGeckoInstruction inst, ARM64Reg reg_a,
+                                ARM64Reg reg_b, BitSet32 gpr_caller_save, BitSet32 fpr_caller_save)
 {
+  const ARM64Reg branch_watch = EncodeRegTo64(reg_a);
+  MOVP2R(branch_watch, &m_branch_watch);
+  LDRB(IndexType::Unsigned, reg_b, branch_watch, Core::BranchWatch::GetOffsetOfRecordingActive());
+  FixupBranch branch_over = CBZ(reg_b);
+
+  FixupBranch branch_in = B();
+  SwitchToFarCode();
+  SetJumpTarget(branch_in);
+
+  const ARM64Reg float_emit_tmp = EncodeRegTo64(reg_b);
   ABI_PushRegisters(gpr_caller_save);
-  m_float_emit.ABI_PushRegisters(fpr_caller_save, ARM64Reg::X8);
+  m_float_emit.ABI_PushRegisters(fpr_caller_save, float_emit_tmp);
   ABI_CallFunction(m_ppc_state.msr.IR ? (condition ? &Core::BranchWatch::HitVirtualTrue_fk :
                                                      &Core::BranchWatch::HitVirtualFalse_fk) :
                                         (condition ? &Core::BranchWatch::HitPhysicalTrue_fk :
                                                      &Core::BranchWatch::HitPhysicalFalse_fk),
-                   &m_branch_watch, Core::FakeBranchWatchCollectionKey{origin, destination},
-                   inst.hex);
-  m_float_emit.ABI_PopRegisters(fpr_caller_save, ARM64Reg::X8);
+                   branch_watch, Core::FakeBranchWatchCollectionKey{origin, destination}, inst.hex);
+  m_float_emit.ABI_PopRegisters(fpr_caller_save, float_emit_tmp);
   ABI_PopRegisters(gpr_caller_save);
+
+  FixupBranch branch_out = B();
+  SwitchToNearCode();
+  SetJumpTarget(branch_out);
+  SetJumpTarget(branch_over);
 }
 
-template void JitArm64::WriteBranchWatch<true>(u32, u32, UGeckoInstruction, BitSet32, BitSet32);
-template void JitArm64::WriteBranchWatch<false>(u32, u32, UGeckoInstruction, BitSet32, BitSet32);
+template void JitArm64::WriteBranchWatch<true>(u32, u32, UGeckoInstruction, ARM64Reg, ARM64Reg,
+                                               BitSet32, BitSet32);
+template void JitArm64::WriteBranchWatch<false>(u32, u32, UGeckoInstruction, ARM64Reg, ARM64Reg,
+                                                BitSet32, BitSet32);
 
 void JitArm64::WriteBranchWatchDestInRegister(u32 origin, ARM64Reg destination,
-                                              UGeckoInstruction inst, BitSet32 gpr_caller_save,
+                                              UGeckoInstruction inst, ARM64Reg reg_a,
+                                              ARM64Reg reg_b, BitSet32 gpr_caller_save,
                                               BitSet32 fpr_caller_save)
 {
+  const ARM64Reg branch_watch = EncodeRegTo64(reg_a);
+  MOVP2R(branch_watch, &m_branch_watch);
+  LDRB(IndexType::Unsigned, reg_b, branch_watch, Core::BranchWatch::GetOffsetOfRecordingActive());
+  FixupBranch branch_over = CBZ(reg_b);
+
+  FixupBranch branch_in = B();
+  SwitchToFarCode();
+  SetJumpTarget(branch_in);
+
+  const ARM64Reg float_emit_tmp = EncodeRegTo64(reg_b);
   ABI_PushRegisters(gpr_caller_save);
-  m_float_emit.ABI_PushRegisters(fpr_caller_save, ARM64Reg::X8);
+  m_float_emit.ABI_PushRegisters(fpr_caller_save, float_emit_tmp);
   ABI_CallFunction(m_ppc_state.msr.IR ? &Core::BranchWatch::HitVirtualTrue :
                                         &Core::BranchWatch::HitPhysicalTrue,
-                   &m_branch_watch, origin, destination, inst.hex);
-  m_float_emit.ABI_PopRegisters(fpr_caller_save, ARM64Reg::X8);
+                   branch_watch, origin, destination, inst.hex);
+  m_float_emit.ABI_PopRegisters(fpr_caller_save, float_emit_tmp);
   ABI_PopRegisters(gpr_caller_save);
+
+  FixupBranch branch_out = B();
+  SwitchToNearCode();
+  SetJumpTarget(branch_out);
+  SetJumpTarget(branch_over);
 }
 
 void JitArm64::bx(UGeckoInstruction inst)
@@ -119,16 +151,15 @@ void JitArm64::bx(UGeckoInstruction inst)
     STR(IndexType::Unsigned, WA, PPC_REG, PPCSTATE_OFF_SPR(SPR_LR));
   }
 
-  // PPCAnalyzer::Analyze() followed the branch, thus the next instruction of the block is the
-  // destination of the branch, no need to do anything.
-  if (js.op->branchAction == PPCAnalyst::BranchAction::Follow)
+  if (!js.isLastInstruction)
   {
-    if (IsBranchWatchEnabled())
+    if (IsDebuggingEnabled())
     {
-      BitSet32 gpr_caller_save = gpr.GetCallerSavedUsed();
+      const auto WB = gpr.GetScopedReg(), WC = gpr.GetScopedReg();
+      BitSet32 gpr_caller_save = gpr.GetCallerSavedUsed() & ~BitSet32{DecodeReg(WB), DecodeReg(WC)};
       if (WA != ARM64Reg::INVALID_REG && js.op->skipLRStack)
         gpr_caller_save[DecodeReg(WA)] = false;
-      WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, gpr_caller_save,
+      WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, WB, WC, gpr_caller_save,
                              fpr.GetCallerSavedUsed());
     }
     if (inst.LK && !js.op->skipLRStack)
@@ -142,18 +173,19 @@ void JitArm64::bx(UGeckoInstruction inst)
     return;
   }
 
-  gpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
-  fpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
+  gpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
+  fpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
 
-  if (js.op->branchAction == PPCAnalyst::BranchAction::IdleLoop)
+  if (js.op->branchIsIdleLoop)
   {
-    if (IsBranchWatchEnabled())
-    {
-      WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, {}, {});
-    }
-
     if (WA == ARM64Reg::INVALID_REG)
       WA = gpr.GetScopedReg();
+
+    if (IsDebuggingEnabled())
+    {
+      const auto WB = gpr.GetScopedReg();
+      WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, WA, WB, {}, {});
+    }
 
     // make idle loops go faster
     ARM64Reg XA = EncodeRegTo64(WA);
@@ -166,11 +198,12 @@ void JitArm64::bx(UGeckoInstruction inst)
     return;
   }
 
-  if (IsBranchWatchEnabled())
+  if (IsDebuggingEnabled())
   {
+    const auto WB = gpr.GetScopedReg(), WC = gpr.GetScopedReg();
     const BitSet32 gpr_caller_save =
         WA != ARM64Reg::INVALID_REG ? BitSet32{DecodeReg(WA)} & CALLER_SAVED_GPRS : BitSet32{};
-    WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, gpr_caller_save, {});
+    WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, WB, WC, gpr_caller_save, {});
   }
   WriteExit(js.op->branchTo, inst.LK, js.compilerPC + 4, WA);
 }
@@ -180,21 +213,15 @@ void JitArm64::bcx(UGeckoInstruction inst)
   INSTRUCTION_START
   JITDISABLE(bJITBranchOff);
 
-  Arm64GPRCache::ScopedARM64Reg WA = ARM64Reg::INVALID_REG;
-  if ((inst.BO & BO_DONT_DECREMENT_FLAG) == 0 || inst.LK ||
-      js.op->branchAction != PPCAnalyst::BranchAction::Follow)
-  {
-    WA = gpr.GetScopedReg();
-  }
-  // If WA isn't needed for WriteExit, it can be safely clobbered. Same if the function returns
-  // before WB is used in the first place (if the branch is followed).
-  // While it may seem desirable to declare it later, note that GetScopedReg() may flush a register,
-  // an operation that cannot be skipped: thus, it must declared before emitting a branch.
-  auto WB = (inst.LK && js.op->branchAction == PPCAnalyst::BranchAction::Normal) ?
-                gpr.GetScopedReg() :
-                Arm64GPRCache::ScopedARM64Reg(WA.GetReg());
+  auto WA = gpr.GetScopedReg();
+  auto WB = inst.LK || IsDebuggingEnabled() ? gpr.GetScopedReg() :
+                                              Arm64GPRCache::ScopedARM64Reg(WA.GetReg());
 
   {
+    auto WC = IsDebuggingEnabled() && inst.LK && !js.op->branchIsIdleLoop ?
+                  gpr.GetScopedReg() :
+                  Arm64GPRCache::ScopedARM64Reg(ARM64Reg::INVALID_REG);
+
     FixupBranch pCTRDontBranch;
     if ((inst.BO & BO_DONT_DECREMENT_FLAG) == 0)  // Decrement and test CTR
     {
@@ -222,38 +249,23 @@ void JitArm64::bcx(UGeckoInstruction inst)
       STR(IndexType::Unsigned, WA, PPC_REG, PPCSTATE_OFF_SPR(SPR_LR));
     }
 
-    // PPCAnalyzer::Analyze() followed this unconditional branch, thus the next instruction of the
-    // block is the destination of the branch, no need to do anything.
-    if (js.op->branchAction == PPCAnalyst::BranchAction::Follow)
-    {
-      if (IsBranchWatchEnabled())
-      {
-        BitSet32 gpr_caller_save = gpr.GetCallerSavedUsed();
-        if (WA != ARM64Reg::INVALID_REG && js.op->skipLRStack)
-          gpr_caller_save[DecodeReg(WA)] = false;
-        WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, gpr_caller_save,
-                               fpr.GetCallerSavedUsed());
-      }
-      if (inst.LK && !js.op->skipLRStack)
-      {
-        // We have to fake the stack as the RET instruction was not
-        // found in the same block. This is a big overhead, but still
-        // better than calling the dispatcher.
-        FakeLKExit(js.compilerPC + 4, WA);
-      }
-      return;
-    }
-
     gpr.Flush(FlushMode::MaintainState, WB);
     fpr.Flush(FlushMode::MaintainState, ARM64Reg::INVALID_REG);
 
-    if (IsBranchWatchEnabled())
+    if (IsDebuggingEnabled())
     {
-      BitSet32 gpr_caller_save = gpr.GetCallerSavedUsed() & ~BitSet32{DecodeReg(WB)};
-      WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, gpr_caller_save,
-                             fpr.GetCallerSavedUsed());
+      ARM64Reg bw_reg_a, bw_reg_b;
+      // WC is only allocated when WA is needed for WriteExit and cannot be clobbered.
+      if (WC == ARM64Reg::INVALID_REG)
+        bw_reg_a = WA, bw_reg_b = WB;
+      else
+        bw_reg_a = WB, bw_reg_b = WC;
+      const BitSet32 gpr_caller_save =
+          gpr.GetCallerSavedUsed() & ~BitSet32{DecodeReg(bw_reg_a), DecodeReg(bw_reg_b)};
+      WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, bw_reg_a, bw_reg_b,
+                             gpr_caller_save, fpr.GetCallerSavedUsed());
     }
-    if (js.op->branchAction == PPCAnalyst::BranchAction::IdleLoop)
+    if (js.op->branchIsIdleLoop)
     {
       // make idle loops go faster
       ARM64Reg XA = EncodeRegTo64(WA);
@@ -276,17 +288,19 @@ void JitArm64::bcx(UGeckoInstruction inst)
 
   if (!analyzer.HasOption(PPCAnalyst::PPCAnalyzer::OPTION_CONDITIONAL_CONTINUE))
   {
-    gpr.Flush(FlushMode::Full, WA);
-    fpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
-    if (IsBranchWatchEnabled())
+    gpr.Flush(FlushMode::All, WA);
+    fpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
+    if (IsDebuggingEnabled())
     {
-      WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, {}, {});
+      WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, WA, WB, {}, {});
     }
     WriteExit(js.compilerPC + 4);
   }
-  else if (IsBranchWatchEnabled())
+  else if (IsDebuggingEnabled())
   {
-    WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, gpr.GetCallerSavedUsed(),
+    const BitSet32 gpr_caller_save =
+        gpr.GetCallerSavedUsed() & ~BitSet32{DecodeReg(WA), DecodeReg(WB)};
+    WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, WA, WB, gpr_caller_save,
                             fpr.GetCallerSavedUsed());
   }
 }
@@ -308,8 +322,8 @@ void JitArm64::bcctrx(UGeckoInstruction inst)
   // BO_2 == 1z1zz -> b always
 
   // NPC = CTR & 0xfffffffc;
-  gpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
-  fpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
+  gpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
+  fpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
 
   Arm64GPRCache::ScopedARM64Reg WB = ARM64Reg::INVALID_REG;
   if (inst.LK_3)
@@ -324,13 +338,14 @@ void JitArm64::bcctrx(UGeckoInstruction inst)
   LDR(IndexType::Unsigned, WA, PPC_REG, PPCSTATE_OFF_SPR(SPR_CTR));
   AND(WA, WA, LogicalImm(~0x3, GPRSize::B32));
 
-  if (IsBranchWatchEnabled())
+  if (IsDebuggingEnabled())
   {
+    const auto WC = gpr.GetScopedReg(), WD = gpr.GetScopedReg();
     BitSet32 gpr_caller_save = BitSet32{DecodeReg(WA)};
     if (WB != ARM64Reg::INVALID_REG)
       gpr_caller_save[DecodeReg(WB)] = true;
     gpr_caller_save &= CALLER_SAVED_GPRS;
-    WriteBranchWatchDestInRegister(js.compilerPC, WA, inst, gpr_caller_save, {});
+    WriteBranchWatchDestInRegister(js.compilerPC, WA, inst, WC, WD, gpr_caller_save, {});
   }
   WriteExit(WA, inst.LK_3, js.compilerPC + 4, WB);
 }
@@ -345,10 +360,18 @@ void JitArm64::bclrx(UGeckoInstruction inst)
 
   auto WA = gpr.GetScopedReg();
   Arm64GPRCache::ScopedARM64Reg WB;
-  if (conditional || inst.LK)
+  if (conditional || inst.LK || IsDebuggingEnabled())
+  {
     WB = gpr.GetScopedReg();
+  }
 
   {
+    Arm64GPRCache::ScopedARM64Reg WC;
+    if (IsDebuggingEnabled())
+    {
+      WC = gpr.GetScopedReg();
+    }
+
     FixupBranch pCTRDontBranch;
     if ((inst.BO & BO_DONT_DECREMENT_FLAG) == 0)  // Decrement and test CTR
     {
@@ -378,30 +401,30 @@ void JitArm64::bclrx(UGeckoInstruction inst)
       STR(IndexType::Unsigned, WB, PPC_REG, PPCSTATE_OFF_SPR(SPR_LR));
     }
 
-    gpr.Flush(conditional ? FlushMode::MaintainState : FlushMode::Full, WB);
-    fpr.Flush(conditional ? FlushMode::MaintainState : FlushMode::Full, ARM64Reg::INVALID_REG);
+    gpr.Flush(conditional ? FlushMode::MaintainState : FlushMode::All, WB);
+    fpr.Flush(conditional ? FlushMode::MaintainState : FlushMode::All, ARM64Reg::INVALID_REG);
 
-    if (IsBranchWatchEnabled())
+    if (IsDebuggingEnabled())
     {
       BitSet32 gpr_caller_save;
       BitSet32 fpr_caller_save;
       if (conditional)
       {
-        gpr_caller_save = gpr.GetCallerSavedUsed();
-        if (js.op->branchAction == PPCAnalyst::BranchAction::IdleLoop)
+        gpr_caller_save = gpr.GetCallerSavedUsed() & ~BitSet32{DecodeReg(WB), DecodeReg(WC)};
+        if (js.op->branchIsIdleLoop)
           gpr_caller_save[DecodeReg(WA)] = false;
         fpr_caller_save = fpr.GetCallerSavedUsed();
       }
       else
       {
-        gpr_caller_save = js.op->branchAction == PPCAnalyst::BranchAction::IdleLoop ?
-                              BitSet32{} :
-                              BitSet32{DecodeReg(WA)} & CALLER_SAVED_GPRS;
+        gpr_caller_save =
+            js.op->branchIsIdleLoop ? BitSet32{} : BitSet32{DecodeReg(WA)} & CALLER_SAVED_GPRS;
         fpr_caller_save = {};
       }
-      WriteBranchWatchDestInRegister(js.compilerPC, WA, inst, gpr_caller_save, fpr_caller_save);
+      WriteBranchWatchDestInRegister(js.compilerPC, WA, inst, WB, WC, gpr_caller_save,
+                                     fpr_caller_save);
     }
-    if (js.op->branchAction == PPCAnalyst::BranchAction::IdleLoop)
+    if (js.op->branchIsIdleLoop)
     {
       // make idle loops go faster
       ARM64Reg XA = EncodeRegTo64(WA);
@@ -424,18 +447,19 @@ void JitArm64::bclrx(UGeckoInstruction inst)
 
   if (!analyzer.HasOption(PPCAnalyst::PPCAnalyzer::OPTION_CONDITIONAL_CONTINUE))
   {
-    gpr.Flush(FlushMode::Full, WA);
-    fpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
-    if (IsBranchWatchEnabled())
+    gpr.Flush(FlushMode::All, WA);
+    fpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
+    if (IsDebuggingEnabled())
     {
-      WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, {}, {});
+      WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, WA, WB, {}, {});
     }
     WriteExit(js.compilerPC + 4);
   }
-  else if (IsBranchWatchEnabled())
+  else if (IsDebuggingEnabled())
   {
-    const BitSet32 gpr_caller_save = gpr.GetCallerSavedUsed() & ~BitSet32{DecodeReg(WA)};
-    WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, gpr_caller_save,
+    const BitSet32 gpr_caller_save =
+        gpr.GetCallerSavedUsed() & ~BitSet32{DecodeReg(WA), DecodeReg(WB)};
+    WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, WA, WB, gpr_caller_save,
                             fpr.GetCallerSavedUsed());
   }
 }

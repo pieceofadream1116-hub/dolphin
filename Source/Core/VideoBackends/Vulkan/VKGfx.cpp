@@ -5,9 +5,9 @@
 
 #include <cstddef>
 #include <cstdio>
-#include <utility>
 
 #include "Common/CommonTypes.h"
+#include "Common/EnumUtils.h"
 #include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
 
@@ -60,10 +60,9 @@ std::unique_ptr<AbstractStagingTexture> VKGfx::CreateStagingTexture(StagingTextu
 }
 
 std::unique_ptr<AbstractShader>
-VKGfx::CreateShaderFromSource(ShaderStage stage, std::string_view source,
-                              VideoCommon::ShaderIncluder* shader_includer, std::string_view name)
+VKGfx::CreateShaderFromSource(ShaderStage stage, std::string_view source, std::string_view name)
 {
-  return VKShader::CreateFromSource(stage, source, shader_includer, name);
+  return VKShader::CreateFromSource(stage, source, name);
 }
 
 std::unique_ptr<AbstractShader> VKGfx::CreateShaderFromBinary(ShaderStage stage, const void* data,
@@ -273,7 +272,7 @@ bool VKGfx::BindBackbuffer(const ClearColor& clear_color)
     else
     {
       ERROR_LOG_FMT(VIDEO, "Unknown present error {:#010X} {}, please report.",
-                    std::to_underlying(res), VkResultToString(res));
+                    Common::ToUnderlying(res), VkResultToString(res));
       m_swap_chain->RecreateSwapChain();
     }
 
@@ -286,8 +285,8 @@ bool VKGfx::BindBackbuffer(const ClearColor& clear_color)
       }
       else
       {
-        PanicAlertFmt("Failed to grab image from swap chain: {:#010X} {}", std::to_underlying(res),
-                      VkResultToString(res));
+        PanicAlertFmt("Failed to grab image from swap chain: {:#010X} {}",
+                      Common::ToUnderlying(res), VkResultToString(res));
       }
     }
   }

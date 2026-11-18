@@ -9,28 +9,12 @@ class GCPadEmu final : public MappingWidget
 {
   Q_OBJECT
 public:
-  enum class SubType
-  {
-    StandardController,
-    AMBaseboard,
-  };
-
-  GCPadEmu(MappingWindow* window, SubType sub_type);
+  explicit GCPadEmu(MappingWindow* window);
 
   InputConfig* GetConfig() override;
 
 private:
   void LoadSettings() override;
   void SaveSettings() override;
-  void CreateMainLayout(SubType sub_type);
+  void CreateMainLayout();
 };
-
-[[nodiscard]] inline auto CreateStandardControllerMappingWidget(MappingWindow* parent)
-{
-  return new GCPadEmu{parent, GCPadEmu::SubType::StandardController};
-}
-
-[[nodiscard]] inline auto CreateAMBaseboardMappingWidget(MappingWindow* parent)
-{
-  return new GCPadEmu{parent, GCPadEmu::SubType::AMBaseboard};
-}

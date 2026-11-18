@@ -10,14 +10,13 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include "Common/CommonTypes.h"
-#include "Common/LazyMemoryRegionBitSet.h"
-#include "Common/RangeSet.h"
 #include "Core/HW/Memmap.h"
 #include "Core/PowerPC/Gekko.h"
 #include "Core/PowerPC/PPCAnalyst.h"
@@ -102,7 +101,7 @@ struct JitBlock : public JitBlockData
   std::vector<LinkData> linkData;
 
   // This set stores all physical addresses of all occupied instructions.
-  Common::RangeSet<u32> physical_addresses;
+  std::set<u32> physical_addresses;
 
   // This is only available when debugging is enabled. It is a trimmed-down copy of the
   // PPCAnalyst::CodeBuffer used to recompile this block, including repeat instructions.
@@ -112,6 +111,36 @@ struct JitBlock : public JitBlockData
 };
 
 typedef void (*CompiledCode)();
+
+// This is essentially just an std::bitset, but Visual Studia 2013's
+// implementation of std::bitset is slow.
+class ValidBlockBitSet final
+{
+public:
+  enum
+  {
+    // ValidBlockBitSet covers the whole 32-bit address-space in 32-byte
+    // chunks.
+    // FIXME: Maybe we can get away with less? There isn't any actual
+    // RAM in most of this space.
+    VALID_BLOCK_MASK_SIZE = (1ULL << 32) / 32,
+    // The number of elements in the allocated array. Each u32 contains 32 bits.
+    VALID_BLOCK_ALLOC_ELEMENTS = VALID_BLOCK_MASK_SIZE / 32
+  };
+  // Directly accessed by Jit64.
+  std::unique_ptr<u32[]> m_valid_block;
+
+  ValidBlockBitSet()
+  {
+    m_valid_block.reset(new u32[VALID_BLOCK_ALLOC_ELEMENTS]);
+    ClearAll();
+  }
+
+  void Set(u32 bit) { m_valid_block[bit / 32] |= 1u << (bit % 32); }
+  void Clear(u32 bit) { m_valid_block[bit / 32] &= ~(1u << (bit % 32)); }
+  void ClearAll() { memset(m_valid_block.get(), 0, sizeof(u32) * VALID_BLOCK_ALLOC_ELEMENTS); }
+  bool Test(u32 bit) const { return (m_valid_block[bit / 32] & (1u << (bit % 32))) != 0; }
+};
 
 class JitBaseBlockCache
 {
@@ -125,16 +154,15 @@ public:
   explicit JitBaseBlockCache(JitBase& jit);
   virtual ~JitBaseBlockCache();
 
-  [[nodiscard]] virtual bool Init();
+  virtual void Init();
   void Shutdown();
   void Clear();
-  [[nodiscard]] bool Reset();
+  void Reset();
 
   // Code Cache
   u8** GetEntryPoints();
   JitBlock** GetFastBlockMapFallback();
-  void RunOnBlocks(const Core::CPUThreadGuard& guard,
-                   const std::function<void(const JitBlock&)>& f) const;
+  void RunOnBlocks(const Core::CPUThreadGuard& guard, std::function<void(const JitBlock&)> f) const;
   void WipeBlockProfilingData(const Core::CPUThreadGuard& guard);
   std::size_t GetBlockCount() const { return block_map.size(); }
 
@@ -158,7 +186,7 @@ public:
   void ErasePhysicalRange(u32 address, u32 length);
   void EraseSingleBlock(const JitBlock& block);
 
-  const u32* GetBlockBitSet() const;
+  u32* GetBlockBitSet() const;
 
 protected:
   virtual void DestroyBlock(JitBlock& block);
@@ -190,20 +218,18 @@ private:
   // Range of overlapping code indexed by a masked physical address.
   // This is used for invalidation of memory regions. The range is grouped
   // in macro blocks of each 0x100 bytes.
-  static constexpr u32 BLOCK_RANGE_SIZE = 0x100;
-  static constexpr u32 BLOCK_RANGE_MAP_MASK = ~(BLOCK_RANGE_SIZE - 1);
+  static constexpr u32 BLOCK_RANGE_MAP_MASK = ~(0x100 - 1);
   std::map<u32, std::unordered_set<JitBlock*>> block_range_map;
 
-  // This bitset shows which cachelines overlap with any blocks.
+  // This bitsets shows which cachelines overlap with any blocks.
   // It is used to provide a fast way to query if no icache invalidation is needed.
-  static constexpr u32 VALID_BLOCK_CACHE_LINE_SIZE = 32;
-  Common::LazyMemoryRegionBitSet valid_block{(1ULL << 32) / VALID_BLOCK_CACHE_LINE_SIZE};
+  ValidBlockBitSet valid_block;
 
   // This contains the entry points for each block.
   // It is used by the assembly dispatcher to quickly
   // know where to jump based on pc and msr bits.
   Common::LazyMemoryRegion m_entry_points_arena;
-  u8** m_entry_points_ptr = nullptr;
+  u8** m_entry_points_ptr = 0;
 
   // An alternative for the above but without a shm segment
   // in case the shm memory region couldn't be allocated.

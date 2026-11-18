@@ -11,7 +11,6 @@
 #include <mach/mach.h>
 #endif
 
-#include "Common/Align.h"
 #include "Common/CommonTypes.h"
 #include "Common/DynamicLibrary.h"
 
@@ -103,22 +102,10 @@ public:
   /// from.
   /// @param size Size of the region to map.
   /// @param base Address within the memory region from ReserveMemoryRegion() where to map it.
-  /// @param writeable Whether the region should be both readable and writeable, or just readable.
   ///
   /// @return The address we actually ended up mapping, which should be the given 'base'.
   ///
-  void* MapInMemoryRegion(s64 offset, size_t size, void* base, bool writeable);
-
-  ///
-  /// Changes whether a section mapped by MapInMemoryRegion is writeable.
-  ///
-  /// @param view The address returned by MapInMemoryRegion.
-  /// @param size The size passed to MapInMemoryRegion.
-  /// @param writeable Whether the region should be both readable and writeable, or just readable.
-  ///
-  /// @return Whether the operation succeeded.
-  ///
-  bool ChangeMappingProtection(void* view, size_t size, bool writeable);
+  void* MapInMemoryRegion(s64 offset, size_t size, void* base);
 
   ///
   /// Unmap a memory region previously mapped with MapInMemoryRegion().
@@ -127,11 +114,6 @@ public:
   /// @param size Size passed to the corresponding MapInMemoryRegion() call.
   ///
   void UnmapFromMemoryRegion(void* view, size_t size);
-
-  ///
-  /// Return the system's page size or required page alignment, whichever is larger.
-  ///
-  size_t GetPageSize() const;
 
 private:
 #ifdef _WIN32
@@ -145,6 +127,7 @@ private:
 #elif defined(__APPLE__)
   vm_address_t m_shm_address = 0;
   vm_size_t m_shm_size = 0;
+  mem_entry_name_port_t m_shm_entry = MACH_PORT_NULL;
 
   vm_address_t m_region_address = 0;
   vm_size_t m_region_size = 0;
@@ -160,8 +143,6 @@ private:
 class LazyMemoryRegion final
 {
 public:
-  constexpr static size_t WINDOWS_BLOCK_SIZE = 1024 * 1024;  // size of allocated memory blocks
-
   LazyMemoryRegion();
   ~LazyMemoryRegion();
   LazyMemoryRegion(const LazyMemoryRegion&) = delete;
@@ -200,21 +181,9 @@ public:
   void EnsureMemoryPageWritable(size_t offset)
   {
 #ifdef _WIN32
-    const size_t block_index = offset / WINDOWS_BLOCK_SIZE;
+    const size_t block_index = offset / BLOCK_SIZE;
     if (m_writable_block_handles[block_index] == nullptr)
       MakeMemoryBlockWritable(block_index);
-#endif
-  }
-
-  void EnsureMemoryPagesWritable(size_t offset, size_t size)
-  {
-#ifdef _WIN32
-    const size_t end_offset = offset + size;
-    for (size_t i = Common::AlignDown(offset, WINDOWS_BLOCK_SIZE); i < end_offset;
-         i += WINDOWS_BLOCK_SIZE)
-    {
-      EnsureMemoryPageWritable(i);
-    }
 #endif
   }
 
@@ -224,6 +193,7 @@ private:
 
 #ifdef _WIN32
   void* m_zero_block = nullptr;
+  constexpr static size_t BLOCK_SIZE = 8 * 1024 * 1024;  // size of allocated memory blocks
   WindowsMemoryFunctions m_memory_functions;
   std::vector<void*> m_writable_block_handles;
 

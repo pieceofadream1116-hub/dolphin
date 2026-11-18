@@ -39,8 +39,6 @@ Make AA apply instantly during gameplay if possible
 #include <string>
 #include <vector>
 
-#include <fmt/format.h>
-
 #include "Common/Common.h"
 #include "Common/GL/GLContext.h"
 #include "Common/GL/GLUtil.h"
@@ -56,16 +54,16 @@ Make AA apply instantly during gameplay if possible
 #include "VideoBackends/OGL/ProgramShaderCache.h"
 #include "VideoBackends/OGL/SamplerCache.h"
 
-#include "VideoCommon/OnScreenDisplay.h"
+#include "VideoCommon/FramebufferManager.h"
 #include "VideoCommon/TextureCacheBase.h"
 #include "VideoCommon/VideoCommon.h"
 #include "VideoCommon/VideoConfig.h"
 
 namespace OGL
 {
-std::string VideoBackend::GetConfigName() const
+std::string VideoBackend::GetName() const
 {
-  return CONFIG_NAME;
+  return NAME;
 }
 
 std::string VideoBackend::GetDisplayName() const
@@ -79,7 +77,7 @@ std::string VideoBackend::GetDisplayName() const
 void VideoBackend::InitBackendInfo(const WindowSystemInfo& wsi)
 {
   std::unique_ptr<GLContext> temp_gl_context =
-      GLContext::Create(wsi, g_Config.stereo_mode == StereoMode::QuadBuffer, true,
+      GLContext::Create(wsi, g_Config.stereo_mode == StereoMode::QuadBuffer, true, false,
                         Config::Get(Config::GFX_PREFER_GLES));
 
   if (!temp_gl_context)
@@ -135,7 +133,7 @@ bool VideoBackend::FillBackendInfo(GLContext* context)
   g_backend_info.bSupportsPipelineCacheData = false;
   g_backend_info.bSupportsLodBiasInSampler = true;
   g_backend_info.bSupportsPartialMultisampleResolve = true;
-  // Unnecessary since OGL doesn't use pipelines
+  // Unneccessary since OGL doesn't use pipelines
   g_backend_info.bSupportsDynamicVertexLoader = false;
 
   // TODO: There is a bug here, if texel buffers or SSBOs/atomics are not supported the graphics
@@ -198,25 +196,13 @@ bool VideoBackend::FillBackendInfo(GLContext* context)
 bool VideoBackend::Initialize(const WindowSystemInfo& wsi)
 {
   std::unique_ptr<GLContext> main_gl_context =
-      GLContext::Create(wsi, g_Config.stereo_mode == StereoMode::QuadBuffer, true,
+      GLContext::Create(wsi, g_Config.stereo_mode == StereoMode::QuadBuffer, true, false,
                         Config::Get(Config::GFX_PREFER_GLES));
   if (!main_gl_context)
     return false;
 
   if (!FillBackendInfo(main_gl_context.get()))
     return false;
-
-  OSD::AddMessage(fmt::format("Video Info: {}, {}, {}", g_ogl_config.gl_vendor,
-                              g_ogl_config.gl_renderer, g_ogl_config.gl_version),
-                  5000);
-
-  if (!g_ogl_config.bSupportsGLBufferStorage && !g_ogl_config.bSupportsGLPinnedMemory)
-  {
-    OSD::AddMessage(fmt::format("Your OpenGL driver does not support {}_buffer_storage.",
-                                main_gl_context->IsGLES() ? "EXT" : "ARB"),
-                    60000);
-    OSD::AddMessage("This device's performance may be poor.", 60000);
-  }
 
   auto gfx = std::make_unique<OGLGfx>(std::move(main_gl_context), wsi.render_surface_scale);
   ProgramShaderCache::Init();

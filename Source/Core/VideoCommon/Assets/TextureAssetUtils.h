@@ -7,13 +7,12 @@
 
 #include "VideoCommon/Assets/CustomAssetLibrary.h"
 #include "VideoCommon/Assets/TextureAsset.h"
-#include "VideoCommon/TextureConfig.h"
 
 namespace VideoCommon
 {
 bool LoadTextureDataFromFile(const CustomAssetLibrary::AssetID& asset_id,
-                             const std::filesystem::path& asset_path, AbstractTextureType type,
-                             CustomTextureData* data);
+                             const std::filesystem::path& asset_path,
+                             TextureAndSamplerData::Type type, CustomTextureData* data);
 
 bool ValidateTextureData(const CustomAssetLibrary::AssetID& asset_id, const CustomTextureData& data,
                          u32 native_width, u32 native_height);

@@ -21,7 +21,6 @@
 #include "Core/PowerPC/JitArmCommon/BackPatch.h"
 #include "Core/PowerPC/MMU.h"
 #include "Core/PowerPC/PowerPC.h"
-#include "Core/System.h"
 
 using namespace Arm64Gen;
 
@@ -67,7 +66,7 @@ void JitArm64::EmitBackpatchRoutine(u32 flags, MemAccessMode mode, ARM64Reg RS, 
   const bool emit_slow_access = mode != MemAccessMode::AlwaysFastAccess;
 
   bool in_far_code = false;
-  u8* fast_access_start = GetWritableCodePtr();
+  const u8* fast_access_start = GetCodePtr();
   std::optional<FixupBranch> slow_access_fixup;
 
   if (emit_fast_access)
@@ -148,7 +147,7 @@ void JitArm64::EmitBackpatchRoutine(u32 flags, MemAccessMode mode, ARM64Reg RS, 
       ByteswapAfterLoad(this, &m_float_emit, RS, RS, flags, true, false);
     }
   }
-  u8* fast_access_end = GetWritableCodePtr();
+  const u8* fast_access_end = GetCodePtr();
 
   if (emit_slow_access)
   {
@@ -161,12 +160,9 @@ void JitArm64::EmitBackpatchRoutine(u32 flags, MemAccessMode mode, ARM64Reg RS, 
 
       if (jo.fastmem && !emitting_routine)
       {
-        FastmemArea& fastmem_area = m_fault_to_handler_temp.emplace_back();
-        fastmem_area = {
-            .fast_access_start = fast_access_start,
-            .fast_access_end = fast_access_end,
-            .slow_access_code = GetCodePtr(),
-        };
+        FastmemArea* fastmem_area = &m_fault_to_handler[fast_access_end];
+        fastmem_area->fast_access_code = fast_access_start;
+        fastmem_area->slow_access_code = GetCodePtr();
       }
     }
 
@@ -175,7 +171,6 @@ void JitArm64::EmitBackpatchRoutine(u32 flags, MemAccessMode mode, ARM64Reg RS, 
 
     const ARM64Reg temp_gpr = ARM64Reg::W1;
     const int temp_gpr_index = DecodeReg(temp_gpr);
-    const ARM64Reg temp_fpr = fprs_to_push[0] ? ARM64Reg::INVALID_REG : ARM64Reg::Q0;
 
     BitSet32 gprs_to_push_early = {};
     if (memcheck)
@@ -194,10 +189,16 @@ void JitArm64::EmitBackpatchRoutine(u32 flags, MemAccessMode mode, ARM64Reg RS, 
     ABI_PushRegisters(gprs_to_push & ~gprs_to_push_early);
     m_float_emit.ABI_PushRegisters(fprs_to_push, ARM64Reg::X30);
 
-    // In the case of JitAsm routines, the state we want to store here isn't known
-    // when compiling the routine, so the caller has to store it themselves.
+    // PC is used by memory watchpoints (if enabled), profiling where to insert gather pipe
+    // interrupt checks, and printing accurate PC locations in debug logs.
+    //
+    // In the case of JitAsm routines, we don't know the PC here,
+    // so the caller has to store the PC themselves.
     if (!emitting_routine)
-      FlushPPCStateBeforeSlowAccess(ARM64Reg::W30, temp_fpr);
+    {
+      MOVI2R(ARM64Reg::W30, js.compilerPC);
+      STR(IndexType::Unsigned, ARM64Reg::W30, PPC_REG, PPCSTATE_OFF(pc));
+    }
 
     if (flags & BackPatchInfo::FLAG_STORE)
     {
@@ -225,22 +226,22 @@ void JitArm64::EmitBackpatchRoutine(u32 flags, MemAccessMode mode, ARM64Reg RS, 
 
       if (access_size == 64)
       {
-        ABI_CallFunction(reverse ? &PowerPC::WriteU64SwapFromJit : &PowerPC::WriteFromJit<u64>,
+        ABI_CallFunction(reverse ? &PowerPC::WriteU64SwapFromJit : &PowerPC::WriteU64FromJit,
                          &m_mmu, src_reg, ARM64Reg::W2);
       }
       else if (access_size == 32)
       {
-        ABI_CallFunction(reverse ? &PowerPC::WriteU32SwapFromJit : &PowerPC::WriteFromJit<u32>,
+        ABI_CallFunction(reverse ? &PowerPC::WriteU32SwapFromJit : &PowerPC::WriteU32FromJit,
                          &m_mmu, src_reg, ARM64Reg::W2);
       }
       else if (access_size == 16)
       {
-        ABI_CallFunction(reverse ? &PowerPC::WriteU16SwapFromJit : &PowerPC::WriteFromJit<u16>,
+        ABI_CallFunction(reverse ? &PowerPC::WriteU16SwapFromJit : &PowerPC::WriteU16FromJit,
                          &m_mmu, src_reg, ARM64Reg::W2);
       }
       else
       {
-        ABI_CallFunction(&PowerPC::WriteFromJit<u8>, &m_mmu, src_reg, ARM64Reg::W2);
+        ABI_CallFunction(&PowerPC::WriteU8FromJit, &m_mmu, src_reg, ARM64Reg::W2);
       }
     }
     else if (flags & BackPatchInfo::FLAG_ZERO_256)
@@ -250,13 +251,13 @@ void JitArm64::EmitBackpatchRoutine(u32 flags, MemAccessMode mode, ARM64Reg RS, 
     else
     {
       if (access_size == 64)
-        ABI_CallFunction(&PowerPC::ReadFromJit<u64>, &m_mmu, ARM64Reg::W1);
+        ABI_CallFunction(&PowerPC::ReadU64FromJit, &m_mmu, ARM64Reg::W1);
       else if (access_size == 32)
-        ABI_CallFunction(&PowerPC::ReadFromJit<u32>, &m_mmu, ARM64Reg::W1);
+        ABI_CallFunction(&PowerPC::ReadU32FromJit, &m_mmu, ARM64Reg::W1);
       else if (access_size == 16)
-        ABI_CallFunction(&PowerPC::ReadFromJit<u16>, &m_mmu, ARM64Reg::W1);
+        ABI_CallFunction(&PowerPC::ReadU16FromJit, &m_mmu, ARM64Reg::W1);
       else
-        ABI_CallFunction(&PowerPC::ReadFromJit<u8>, &m_mmu, ARM64Reg::W1);
+        ABI_CallFunction(&PowerPC::ReadU8FromJit, &m_mmu, ARM64Reg::W1);
     }
 
     m_float_emit.ABI_PopRegisters(fprs_to_push, ARM64Reg::X30);
@@ -264,6 +265,7 @@ void JitArm64::EmitBackpatchRoutine(u32 flags, MemAccessMode mode, ARM64Reg RS, 
 
     if (memcheck)
     {
+      const ARM64Reg temp_fpr = fprs_to_push[0] ? ARM64Reg::INVALID_REG : ARM64Reg::Q0;
       const u64 early_push_count = (gprs_to_push & gprs_to_push_early).Count();
       const u64 early_push_size = Common::AlignUp(early_push_count, 2) * 8;
 
@@ -314,53 +316,31 @@ void JitArm64::EmitBackpatchRoutine(u32 flags, MemAccessMode mode, ARM64Reg RS, 
   }
 }
 
-void JitArm64::FlushPPCStateBeforeSlowAccess(ARM64Reg temp_gpr, ARM64Reg temp_fpr)
-{
-  // PC is used by memory watchpoints (if enabled), profiling where to insert gather pipe
-  // interrupt checks, and printing accurate PC locations in debug logs.
-  MOVI2R(temp_gpr, js.compilerPC);
-  STR(IndexType::Unsigned, temp_gpr, PPC_REG, PPCSTATE_OFF(pc));
-
-  // Register values can be used by memory watchpoint conditions.
-  MemChecks& mem_checks = m_system.GetPowerPC().GetMemChecks();
-  if (mem_checks.HasAny())
-  {
-    gpr.FlushRegisters(mem_checks.GetGPRsUsedInConditions(), FlushMode::MaintainState, temp_gpr);
-    fpr.FlushRegisters(mem_checks.GetFPRsUsedInConditions(), FlushMode::MaintainState, temp_fpr);
-  }
-}
-
 bool JitArm64::HandleFastmemFault(SContext* ctx)
 {
   const u8* pc = reinterpret_cast<const u8*>(ctx->CTX_PC);
+  auto slow_handler_iter = m_fault_to_handler.upper_bound(pc);
 
-  // Find the block
-  auto block_it = m_fault_to_handler.lower_bound(pc);
-  if (block_it == m_fault_to_handler.end())
+  // no fastmem area found
+  if (slow_handler_iter == m_fault_to_handler.end())
     return false;
 
-  // Then find the entry
-  auto entry_it = std::ranges::find_if(block_it->second, [pc](auto& entry) {
-    return pc < entry.fast_access_end && pc >= entry.fast_access_start;
-  });
-  if (entry_it == block_it->second.end())
-    return false;
+  const u8* fastmem_area_start = slow_handler_iter->second.fast_access_code;
+  const u8* fastmem_area_end = slow_handler_iter->first;
 
-  u8* fastmem_area_start = entry_it->fast_access_start;
-  u8* fastmem_area_end = entry_it->fast_access_end;
+  // no overlapping fastmem area found
+  if (pc < fastmem_area_start)
+    return false;
 
   const Common::ScopedJITPageWriteAndNoExecute enable_jit_page_writes;
-  ARM64XEmitter emitter(fastmem_area_start, fastmem_area_end);
+  ARM64XEmitter emitter(const_cast<u8*>(fastmem_area_start), const_cast<u8*>(fastmem_area_end));
 
-  emitter.BL(entry_it->slow_access_code);
+  emitter.BL(slow_handler_iter->second.slow_access_code);
 
   while (emitter.GetCodePtr() < fastmem_area_end)
     emitter.NOP();
 
-  // Delete the entry
-  block_it->second.erase(entry_it);
-  if (block_it->second.empty())
-    m_fault_to_handler.erase(block_it);
+  m_fault_to_handler.erase(slow_handler_iter);
 
   emitter.FlushIcache();
 

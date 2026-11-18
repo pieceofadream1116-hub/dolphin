@@ -97,9 +97,6 @@ public:
     return false;
   }
 
-  // Returns true only for CachedBlobReader.
-  virtual bool IsCached() const { return false; }
-
 protected:
   BlobReader() {}
 };

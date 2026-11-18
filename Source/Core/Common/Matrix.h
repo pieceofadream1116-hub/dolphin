@@ -37,10 +37,6 @@ union TVec3
   constexpr T LengthSquared() const { return Dot(*this); }
   T Length() const { return std::sqrt(LengthSquared()); }
   TVec3 Normalized() const { return *this / Length(); }
-  static constexpr TVec3<T> Lerp(const TVec3<T>& a, const TVec3<T>& b, const TVec3<T>& t)
-  {
-    return {std::lerp(a.x, b.x, t.x), std::lerp(a.y, b.y, t.y), std::lerp(a.z, b.z, t.z)};
-  }
 
   constexpr TVec3& operator+=(const TVec3& rhs)
   {
@@ -165,16 +161,6 @@ union TVec4
   constexpr bool operator==(const TVec4& other) const
   {
     return x == other.x && y == other.y && z == other.z && w == other.w;
-  }
-
-  static constexpr TVec4<T> Lerp(const TVec4<T>& a, const TVec4<T>& b, const TVec4<T>& t)
-  {
-    return {
-        std::lerp(a.x, b.x, t.x),
-        std::lerp(a.y, b.y, t.y),
-        std::lerp(a.z, b.z, t.z),
-        std::lerp(a.w, b.w, t.w),
-    };
   }
 
   constexpr T Dot(const TVec4& other) const
@@ -405,9 +391,8 @@ public:
   static void Multiply(const Matrix33& a, const Matrix33& b, Matrix33* result);
   static void Multiply(const Matrix33& a, const Vec3& vec, Vec3* result);
 
-  float Determinant() const;
   Matrix33 Inverted() const;
-  Matrix33 Transposed() const;
+  float Determinant() const;
 
   Matrix33& operator*=(const Matrix33& rhs)
   {
@@ -449,8 +434,6 @@ public:
   Vec3 Transform(const Vec3& point, float w) const;
 
   float Determinant() const;
-  Matrix44 Inverted() const;
-  Matrix44 Transposed() const;
 
   Matrix44& operator*=(const Matrix44& rhs)
   {

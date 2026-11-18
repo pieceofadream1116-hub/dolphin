@@ -44,6 +44,10 @@ IPC_HLE_PERIOD: For the Wii Remote this is the call schedule:
 
 #include "Core/HW/SystemTimers.h"
 
+#include <cfloat>
+#include <cmath>
+#include <cstdlib>
+
 #include "AudioCommon/Mixer.h"
 #include "Common/CommonTypes.h"
 #include "Common/Timer.h"
@@ -214,7 +218,7 @@ s64 SystemTimersManager::GetLocalTimeRTCOffset() const
 
 double SystemTimersManager::GetEstimatedEmulationPerformance() const
 {
-  return m_system.GetPerfMetrics().GetMaxSpeed();
+  return g_perf_metrics.GetMaxSpeed();
 }
 
 // split from Init to break a circular dependency between VideoInterface::Init and

@@ -12,16 +12,46 @@
 #include <fmt/format.h>
 #include <imgui.h>
 
+#include "UICommon/ImGuiMenu/ImGuiFrontend.h"
+#include "UICommon/ImGuiMenu/ImGuiNetplay.h"
+
 #include "Common/CommonTypes.h"
 #include "Common/Config/Config.h"
 #include "Common/Timer.h"
 
+#include "Core/AchievementManager.h"
+#include "Core/Config/AchievementSettings.h"
 #include "Core/Config/MainSettings.h"
+#include "Core/Core.h"
+#include "Core/HW/ProcessorInterface.h"
+#include "Core/Movie.h"
+#include "Core/State.h"
+#include "Core/System.h"
+#include "rcheevos/include/rc_api_runtime.h"
 
+#ifdef WINRT_XBOX
+#include <gamingdeviceinformation.h>
+#include <windows.applicationmodel.h>
+#include <winrt/Windows.ApplicationModel.Core.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.UI.Core.h>
+#include <winrt/windows.gaming.input.h>
+#include <winrt/windows.graphics.display.core.h>
+
+#include "DolphinWinRT/Host.h"
+#include "DolphinWinRT/UWPUtils.h"
+
+using winrt::Windows::UI::Core::CoreWindow;
+using namespace winrt;
+#endif
+
+#include "Common/WindowSystemInfo.h"
 #include "VideoCommon/AbstractGfx.h"
 #include "VideoCommon/AbstractTexture.h"
 #include "VideoCommon/Assets/CustomTextureData.h"
 #include "VideoCommon/TextureConfig.h"
+#include "VideoCommon/VideoBackendBase.h"
+#include "VideoCommon/VideoConfig.h"
 
 namespace OSD
 {
@@ -33,6 +63,8 @@ constexpr float MESSAGE_DROP_TIME = 5000.f;  // Ms to drop OSD messages that has
 
 static std::atomic<int> s_obscured_pixels_left = 0;
 static std::atomic<int> s_obscured_pixels_top = 0;
+static ImGuiFrontend::UIState s_setting_state{};
+static bool s_show_menu;
 
 struct Message
 {
@@ -92,18 +124,28 @@ static float DrawMessage(int index, Message& msg, const ImVec2& position, int ti
       {
         const u32 width = msg.icon->width;
         const u32 height = msg.icon->height;
-        TextureConfig tex_config(width, height, 1, 1, 1, AbstractTextureFormat::RGBA8, 0,
-                                 AbstractTextureType::Texture_2DArray);
-        msg.texture = g_gfx->CreateTexture(tex_config);
-        if (msg.texture)
+        if (width == 0 || height == 0)
         {
-          msg.texture->Load(0, width, height, width, msg.icon->data.data(),
-                            sizeof(u32) * width * height);
+          // Invalid icon dimensions, skip icon
+          msg.icon = nullptr;
         }
         else
         {
-          // don't try again next time
-          msg.icon = nullptr;
+          // Use 2D texture for message icons
+          TextureConfig tex_config(width, height, 1, 1, 1,
+                                   AbstractTextureFormat::RGBA8, 0,
+                                   AbstractTextureType::Texture_2D);
+          msg.texture = g_gfx->CreateTexture(tex_config);
+          if (msg.texture)
+          {
+            msg.texture->Load(0, width, height, width, msg.icon->data.data(),
+                              sizeof(u32) * width * height);
+          }
+          else
+          {
+            // Skip icon next time
+            msg.icon = nullptr;
+          }
         }
       }
 
@@ -142,14 +184,14 @@ void AddTypedMessage(MessageType type, std::string message, u32 ms, u32 argb,
   for (auto it = range.first; it != range.second; ++it)
     it->second.should_discard = true;
 
-  s_messages.emplace(type, Message(std::move(message), ms, argb, icon));
+  s_messages.emplace(type, Message(std::move(message), ms, argb, std::move(icon)));
 }
 
 void AddMessage(std::string message, u32 ms, u32 argb,
                 const VideoCommon::CustomTextureData::ArraySlice::Level* icon)
 {
   std::lock_guard lock{s_messages_mutex};
-  s_messages.emplace(MessageType::Typeless, Message(std::move(message), ms, argb, icon));
+  s_messages.emplace(MessageType::Typeless, Message(std::move(message), ms, argb, std::move(icon)));
 }
 
 void DrawMessages()
@@ -196,6 +238,313 @@ void ClearMessages()
   s_messages.clear();
 }
 
+void DrawInGameMenu()
+{
+  if (!s_show_menu)
+    return;
+
+  float frame_scale = ImGui::GetIO().DisplayFramebufferScale.x;
+  ImGui::SetNextWindowSize(ImVec2(540 * frame_scale, 425 * frame_scale));
+  ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x / 2 - (540 / 2) * frame_scale,
+                                 ImGui::GetIO().DisplaySize.y / 2 - (425 / 2) * frame_scale));
+  if (ImGui::Begin("Pause Menu", nullptr,
+                   ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                       ImGuiWindowFlags_NoScrollbar))
+  {
+    if (ImGui::BeginTabBar("InGameTabs"))
+    {
+#ifdef WINRT_XBOX
+      // todo - make the host handle this!!
+      if (ImGui::BeginTabItem("General"))
+      {
+        if (ImGui::Button("Change Disc"))
+        {
+          UWP::PickDisc();
+        }
+
+        if (ImGui::Button("Reset"))
+        {
+          auto& system = Core::System::GetInstance();
+          auto& movie = system.GetMovie();
+          if (movie.IsRecordingInput())
+            movie.SetReset(true);
+          system.GetProcessorInterface().ResetButton_Tap();
+        }
+
+        if (ImGui::Button("Exit Game"))
+        {
+          if (!UWP::g_tried_graceful_shutdown.TestAndClear())
+          {
+            // First hide the menu and clear any OSD messages
+            s_show_menu = false;
+            ClearMessages();
+
+            // Wait for any pending GPU operations to complete
+            if (g_gfx)
+            {
+              g_gfx->WaitForGPUIdle();
+            }
+
+            // Stop the core first to prevent event processing
+            Core::Stop(Core::System::GetInstance());
+            Core::Shutdown(Core::System::GetInstance());
+
+            // Request shutdown but DO NOT force a frontend reset immediately
+            UWP::g_shutdown_requested.Set();
+
+            // If we want to return to the frontend later, we can set this after proper cleanup
+            // UWP::g_needs_frontend_reset.Set();
+          }
+          else
+          {
+            // If we've already tried graceful shutdown once, force exit
+            if (g_gfx)
+            {
+              g_gfx->WaitForGPUIdle();
+            }
+            Core::Stop(Core::System::GetInstance());
+            Core::Shutdown(Core::System::GetInstance());
+            exit(0);
+          }
+        }
+
+        ImGui::EndTabItem();
+      }
+#endif
+
+      if (ImGui::BeginTabItem("Save States"))
+      {
+        ImGui::TextWrapped(
+            "Warning: Savestates can be buggy with Dual Core enabled, do not rely on them "
+            "or you may risk losing progress.");
+        for (int i = 0; i < 5; i++)
+        {
+          if (ImGui::BeginChild(std::format("savestate-{}", i).c_str(),
+                                ImVec2(-1, 75 * frame_scale), true))
+          {
+            ImGui::Text("Port %d - %s", i, State::GetInfoStringOfSlot(i).c_str());
+
+            if (ImGui::Button(std::format("Load State in Port {}", i).c_str()))
+            {
+              Core::RunOnCPUThread(
+                  Core::System::GetInstance(),
+                  [i] {
+                    s_show_menu = false;
+                    auto& system = Core::System::GetInstance();
+                    Core::SetState(system, Core::State::Running);
+                    State::Load(system, i);
+                  },
+                  false);
+            }
+
+            if (ImGui::Button(std::format("Save State in Port {}", i).c_str()))
+            {
+              Core::RunOnCPUThread(
+                  Core::System::GetInstance(),
+                  [i] {
+                    s_show_menu = false;
+                    auto& system = Core::System::GetInstance();
+                    Core::SetState(system, Core::State::Running);
+                    State::Save(system, i);
+                  },
+                  false);
+            }
+          }
+
+          ImGui::EndChild();
+        }
+
+        ImGui::EndTabItem();
+      }
+
+      if (ImGui::BeginTabItem("Options"))
+      {
+        ImGuiFrontend::DrawSettingsMenu(&s_setting_state, frame_scale);
+        ImGui::EndTabItem();
+      }
+
+      if (ImGui::BeginTabItem("Achievements"))
+      {
+        static int view = 0;
+        ImGui::RadioButton("Achievement List", &view, 0);
+        ImGui::SameLine();
+        ImGui::RadioButton("Leaderboards", &view, 1);
+        if (view == 0)
+        {
+          auto& mgr = AchievementManager::GetInstance();
+          if (!mgr.IsGameLoaded())
+          {
+            ImGui::TextUnformatted("No game loaded.");
+          }
+          else
+          {
+            auto* client = mgr.GetClient();
+            auto* list = rc_client_create_achievement_list(
+                client, RC_CLIENT_ACHIEVEMENT_CATEGORY_CORE_AND_UNOFFICIAL,
+                RC_CLIENT_ACHIEVEMENT_LIST_GROUPING_PROGRESS);
+            if (list)
+            {
+              ImGui::BeginChild("##AchievementsScroll", ImVec2(0, 0), true);
+              static std::map<u32, std::unique_ptr<AbstractTexture>> badge_textures;
+              for (u32 b = 0; b < list->num_buckets; ++b)
+              {
+                const auto& bucket = list->buckets[b];
+                ImGui::TextUnformatted(bucket.label);
+                ImGui::Indent();
+
+                ImGui::TextUnformatted("Unlocked");
+                ImGui::Indent();
+                for (u32 a = 0; a < bucket.num_achievements; ++a)
+                {
+                  const auto* ach = bucket.achievements[a];
+                  if (ach->unlocked)
+                  {
+                    const auto& slice = mgr.GetAchievementBadge(ach->id, ach->unlocked == 0);
+                    auto it_tex = badge_textures.find(ach->id);
+                    if (it_tex == badge_textures.end())
+                    {
+                      // Guard against zero-dimension badges
+                      if (slice.width == 0 || slice.height == 0)
+                      {
+                        badge_textures[ach->id] = nullptr;
+                      }
+                      else
+                      {
+                        TextureConfig cfg(slice.width, slice.height, 1, 1, 1,
+                                          AbstractTextureFormat::RGBA8, 0,
+                                          AbstractTextureType::Texture_2D);
+                        auto tex = g_gfx->CreateTexture(cfg);
+                        if (tex)
+                          tex->Load(0, slice.width, slice.height, slice.width, slice.data.data(),
+                                    slice.width * slice.height * sizeof(u32));
+                        badge_textures[ach->id] = std::move(tex);
+                      }
+                      it_tex = badge_textures.find(ach->id);
+                    }
+                    ImGui::BeginGroup();
+                    if (it_tex != badge_textures.end() && it_tex->second)
+                      ImGui::Image(*it_tex->second.get(), ImVec2(32, 32));
+                    ImGui::SameLine();
+                    ImGui::Text("%s (%u pts)", ach->title, ach->points);
+                    if (ach->measured_percent > 0.0f)
+                      ImGui::ProgressBar(ach->measured_percent * 0.01f, ImVec2(-1, 0),
+                                         ach->measured_progress);
+                    ImGui::EndGroup();
+                    ImGui::Separator();
+                  }
+                }
+                ImGui::Unindent();
+
+                ImGui::TextUnformatted("Locked");
+                ImGui::Indent();
+                for (u32 a = 0; a < bucket.num_achievements; ++a)
+                {
+                  const auto* ach = bucket.achievements[a];
+                  if (!ach->unlocked)
+                  {
+                    const auto& slice = mgr.GetAchievementBadge(ach->id, ach->unlocked == 0);
+                    auto it_tex = badge_textures.find(ach->id);
+                    if (it_tex == badge_textures.end())
+                    {
+                      // Guard against zero-dimension badges
+                      if (slice.width == 0 || slice.height == 0)
+                      {
+                        badge_textures[ach->id] = nullptr;
+                      }
+                      else
+                      {
+                        TextureConfig cfg(slice.width, slice.height, 1, 1, 1,
+                                          AbstractTextureFormat::RGBA8, 0,
+                                          AbstractTextureType::Texture_2D);
+                        auto tex = g_gfx->CreateTexture(cfg);
+                        if (tex)
+                          tex->Load(0, slice.width, slice.height, slice.width, slice.data.data(),
+                                    slice.width * slice.height * sizeof(u32));
+                        badge_textures[ach->id] = std::move(tex);
+                      }
+                      it_tex = badge_textures.find(ach->id);
+                    }
+                    ImGui::BeginGroup();
+                    if (it_tex != badge_textures.end() && it_tex->second)
+                      ImGui::Image(*it_tex->second.get(), ImVec2(32, 32));
+                    ImGui::SameLine();
+                    ImGui::Text("%s (%u pts)", ach->title, ach->points);
+                    if (ach->measured_percent > 0.0f)
+                      ImGui::ProgressBar(ach->measured_percent * 0.01f, ImVec2(-1, 0),
+                                         ach->measured_progress);
+                    ImGui::EndGroup();
+                    ImGui::Separator();
+                  }
+                }
+                ImGui::Unindent();
+                ImGui::Unindent();
+              }
+              ImGui::EndChild();
+              rc_client_destroy_achievement_list(list);
+            }
+          }
+        }
+        else
+        {
+          auto& mgr = AchievementManager::GetInstance();
+          if (!mgr.IsGameLoaded())
+          {
+            ImGui::TextUnformatted("No game loaded.");
+          }
+          else
+          {
+            auto* client = mgr.GetClient();
+            auto* lbs = rc_client_create_leaderboard_list(
+                client, RC_CLIENT_LEADERBOARD_LIST_GROUPING_TRACKING);
+            if (lbs)
+            {
+              ImGui::BeginChild("##LeaderboardsScroll", ImVec2(0, 0), true);
+              for (u32 b = 0; b < lbs->num_buckets; ++b)
+              {
+                const auto& bucket = lbs->buckets[b];
+                ImGui::TextUnformatted(bucket.label);
+                ImGui::Indent();
+                for (u32 i = 0; i < bucket.num_leaderboards; ++i)
+                {
+                  const auto* board = bucket.leaderboards[i];
+                  ImGui::BeginGroup();
+                  ImGui::Text("%s: %s", board->title,
+                              board->tracker_value ? board->tracker_value : "");
+                  ImGui::TextWrapped(board->description);
+                  ImGui::EndGroup();
+                  ImGui::Separator();
+                }
+                ImGui::Unindent();
+              }
+              ImGui::EndChild();
+              rc_client_destroy_leaderboard_list(lbs);
+            }
+          }
+        }
+        ImGui::EndTabItem();
+      }
+
+      if (ImGui::BeginTabItem("Netplay"))
+      {
+        if (g_netplay_client != nullptr)
+        {
+          ImGuiFrontend::DrawLobbyMenu();
+        }
+        else
+        {
+          ImGui::Text("You are not currently in any Netplay lobby.");
+        }
+
+        ImGui::EndTabItem();
+      }
+
+      ImGui::EndTabBar();
+    }
+
+  }
+  ImGui::End();
+}
+
 void SetObscuredPixelsLeft(int width)
 {
   s_obscured_pixels_left = width;
@@ -204,5 +553,10 @@ void SetObscuredPixelsLeft(int width)
 void SetObscuredPixelsTop(int height)
 {
   s_obscured_pixels_top = height;
+}
+
+void ToggleShowSettings()
+{
+  s_show_menu = !s_show_menu;
 }
 }  // namespace OSD

@@ -3,8 +3,11 @@
 
 #include "InputCommon/ControllerEmu/ControlGroup/Buttons.h"
 
+#include <memory>
 #include <string>
-#include <utility>
+
+#include "Common/Common.h"
+#include "InputCommon/ControllerEmu/Setting/NumericSetting.h"
 
 namespace ControllerEmu
 {
@@ -12,8 +15,8 @@ Buttons::Buttons(const std::string& name_) : Buttons(name_, name_)
 {
 }
 
-Buttons::Buttons(std::string ini_name, std::string group_name)
-    : ControlGroup(std::move(ini_name), std::move(group_name), GroupType::Buttons)
+Buttons::Buttons(const std::string& ini_name, const std::string& group_name)
+    : ControlGroup(ini_name, group_name, GroupType::Buttons)
 {
 }
 

@@ -9,63 +9,20 @@
 
 using namespace Gen;
 
-FPURegCache::FPURegCache(Jit64& jit, XEmitter& emitter) : RegCache{jit, emitter}
+FPURegCache::FPURegCache(Jit64& jit) : RegCache{jit}
 {
 }
 
-bool FPURegCache::IsImm(preg_t preg) const
+void FPURegCache::StoreRegister(preg_t preg, const OpArg& new_loc)
 {
-  return false;
-}
-
-u32 FPURegCache::Imm32(preg_t preg) const
-{
-  ASSERT_MSG(DYNA_REC, false, "FPURegCache doesn't support immediates");
-  return 0;
-}
-
-s32 FPURegCache::SImm32(preg_t preg) const
-{
-  ASSERT_MSG(DYNA_REC, false, "FPURegCache doesn't support immediates");
-  return 0;
-}
-
-OpArg FPURegCache::R(preg_t preg) const
-{
-  if (m_regs[preg].IsInHostRegister())
-  {
-    return ::Gen::R(m_regs[preg].GetHostRegister());
-  }
-  else
-  {
-    ASSERT_MSG(DYNA_REC, m_regs[preg].IsInPPCState(), "FPR {} missing!", preg);
-    return GetPPCStateLocation(preg);
-  }
-}
-
-void FPURegCache::StoreRegister(preg_t preg, const OpArg& new_loc,
-                                IgnoreDiscardedRegisters ignore_discarded_registers)
-{
-  if (m_regs[preg].IsInHostRegister())
-  {
-    m_emitter.MOVAPD(new_loc, m_regs[preg].GetHostRegister());
-  }
-  else
-  {
-    ASSERT_MSG(DYNA_REC, ignore_discarded_registers != IgnoreDiscardedRegisters::No,
-               "FPR {} not in host register", preg);
-  }
+  ASSERT_MSG(DYNA_REC, m_regs[preg].IsBound(), "Unbound register - {}", preg);
+  m_emitter->MOVAPD(new_loc, m_regs[preg].Location()->GetSimpleReg());
 }
 
 void FPURegCache::LoadRegister(preg_t preg, X64Reg new_loc)
 {
-  ASSERT_MSG(DYNA_REC, m_regs[preg].IsInPPCState(), "FPR {} not in PPCState", preg);
-  m_emitter.MOVAPD(new_loc, GetPPCStateLocation(preg));
-}
-
-void FPURegCache::DiscardImm(preg_t preg)
-{
-  // FPURegCache doesn't support immediates, so no need to do anything
+  ASSERT_MSG(DYNA_REC, !m_regs[preg].IsDiscarded(), "Discarded register - {}", preg);
+  m_emitter->MOVAPD(new_loc, m_regs[preg].Location().value());
 }
 
 std::span<const X64Reg> FPURegCache::GetAllocationOrder() const
@@ -75,7 +32,7 @@ std::span<const X64Reg> FPURegCache::GetAllocationOrder() const
   return allocation_order;
 }
 
-OpArg FPURegCache::GetPPCStateLocation(preg_t preg) const
+OpArg FPURegCache::GetDefaultLocation(preg_t preg) const
 {
   return PPCSTATE_PS0(preg);
 }

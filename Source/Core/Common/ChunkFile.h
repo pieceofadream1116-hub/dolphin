@@ -32,6 +32,7 @@
 #include "Common/EnumMap.h"
 #include "Common/Flag.h"
 #include "Common/Inline.h"
+#include "Common/Logging/Log.h"
 
 // Wrapper class
 class PointerWrap
@@ -194,15 +195,13 @@ public:
     DoArray(x.data(), static_cast<u32>(x.size()));
   }
 
-  template <typename T>
-  requires(std::is_trivially_copyable_v<T>)
+  template <typename T, typename std::enable_if_t<std::is_trivially_copyable_v<T>, int> = 0>
   void DoArray(T* x, u32 count)
   {
     DoVoid(x, count * sizeof(T));
   }
 
-  template <typename T>
-  requires(!std::is_trivially_copyable_v<T>)
+  template <typename T, typename std::enable_if_t<!std::is_trivially_copyable_v<T>, int> = 0>
   void DoArray(T* x, u32 count)
   {
     for (u32 i = 0; i < count; ++i)
@@ -264,9 +263,9 @@ public:
   }
 
   template <typename T>
-  requires(std::is_trivially_copyable_v<T> && !std::is_pointer_v<T>)
   void Do(T& x)
   {
+    static_assert(std::is_trivially_copyable_v<T>, "Only sane for trivially copyable types");
     // Note:
     // Usually we can just use x = **ptr, etc.  However, this doesn't work
     // for unions containing BitFields (long story, stupid language rules)
@@ -288,7 +287,7 @@ public:
   }
 
   template <typename T>
-  bool DoPointer(T*& x, T* const base, size_t count)
+  void DoPointer(T*& x, T* const base)
   {
     // pointers can be more than 2^31 apart, but you're using this function wrong if you need that
     // much range
@@ -296,23 +295,8 @@ public:
     Do(offset);
     if (IsReadMode())
     {
-      if (offset < 0 || static_cast<size_t>(offset) > count)
-      {
-        SetMeasureMode();
-        return false;
-      }
       x = base + offset;
     }
-    return true;
-  }
-
-  bool DoPointer(void*& x, void* const base, size_t count)
-  {
-    auto* ptr = static_cast<u8*>(x);
-    if (!DoPointer(ptr, static_cast<u8*>(base), count))
-      return false;
-    x = ptr;
-    return true;
   }
 
   void DoMarker(const std::string& prevName, u32 arbitraryNumber = 0x42)

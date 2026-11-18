@@ -59,26 +59,21 @@ PBUpdateData LoadPBUpdates(Memory::MemoryManager& memory, const PB_TYPE& pb)
 // Apply updates to a PB.
 void ApplyUpdatesForMs(int curr_ms, PB_TYPE& pb, u16* num_updates, const PBUpdateData& updates)
 {
+  auto pb_mem = Common::BitCastToArray<u16>(pb);
+
   u32 start_idx = 0;
   for (int i = 0; i < curr_ms; ++i)
     start_idx += num_updates[i];
 
-  if (start_idx < updates.size())
+  for (u32 i = start_idx; i < start_idx + num_updates[curr_ms]; ++i)
   {
-    const u16 count = num_updates[curr_ms];
-    if (count <= updates.size() - start_idx)
-    {
-      const u32 end_idx = start_idx + count;
-      for (u32 i = start_idx; i < end_idx; ++i)
-      {
-        const u16 update_off = updates[i].pb_offset;
-        const u16 update_val = updates[i].new_value;
+    u16 update_off = updates[i].pb_offset;
+    u16 update_val = updates[i].new_value;
 
-        if (update_off < (sizeof(pb) / sizeof(u16)))
-          Common::BitCastPtr<u16>(&pb)[update_off] = update_val;
-      }
-    }
+    pb_mem[update_off] = update_val;
   }
+
+  pb = std::bit_cast<PB_TYPE>(pb_mem);
 }
 
 // Used to pass a large amount of buffers to the mixing function.
@@ -462,12 +457,6 @@ void ProcessVoice(HLEAccelerator* accelerator, PB_TYPE& pb, const AXBuffers& buf
   }
 #endif
 
-#ifdef AX_WII
-  // Some of these will be overwritten during mixing.
-  pb.dpop = {};
-  pb.remote_dpop = {};
-#endif
-
   // Mix LRS, AUXA and AUXB depending on mixer_control
   // TODO: Handle DPL2 on AUXB.
 
@@ -544,10 +533,10 @@ void ProcessVoice(HLEAccelerator* accelerator, PB_TYPE& pb, const AXBuffers& buf
 #undef RAMP_ON
 
   // Optionally, phase shift left or right channel to simulate 3D sound.
-  if (pb.itd.on)
+  if (pb.initial_time_delay.on)
   {
     // TODO
-    DolphinAnalytics::Instance().ReportGameQuirk(GameQuirk::UsesAXInitialTimeDelay);
+    DolphinAnalytics::Instance().ReportGameQuirk(GameQuirk::USES_AX_INITIAL_TIME_DELAY);
   }
 
 #ifdef AX_WII
@@ -559,12 +548,12 @@ void ProcessVoice(HLEAccelerator* accelerator, PB_TYPE& pb, const AXBuffers& buf
       // Only one filter at most for Wiimotes.
       if (pb.remote_iir.on == 2)
       {
-        DolphinAnalytics::Instance().ReportGameQuirk(GameQuirk::UsesAXWiimoteBiquad);
+        DolphinAnalytics::Instance().ReportGameQuirk(GameQuirk::USES_AX_WIIMOTE_BIQUAD);
         BiquadFilter(samples, count, pb.remote_iir.biquad);
       }
       else
       {
-        DolphinAnalytics::Instance().ReportGameQuirk(GameQuirk::UsesAXWiimoteLowPass);
+        DolphinAnalytics::Instance().ReportGameQuirk(GameQuirk::USES_AX_WIIMOTE_LOWPASS);
         LowPassFilter(samples, count, pb.remote_iir.lpf);
       }
     }

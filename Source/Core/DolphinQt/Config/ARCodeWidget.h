@@ -54,16 +54,12 @@ private:
   void SortAlphabetically();
   void SortEnabledCodesFirst();
   void SortDisabledCodesFirst();
-  void UpdateToggleButton();
 
   void OnCodeAddClicked();
   void OnCodeEditClicked();
   void OnCodeRemoveClicked();
-  void OnCodeToggleAllClicked();
 
   void OnListReordered();
-
-  bool IsEveryCodeEnabled();
 
   std::string m_game_id;
   u16 m_game_revision;
@@ -76,7 +72,6 @@ private:
   QPushButton* m_code_add;
   QPushButton* m_code_edit;
   QPushButton* m_code_remove;
-  QPushButton* m_code_toggle_all;
 
   CheatCodeEditor* m_cheat_code_editor;
 

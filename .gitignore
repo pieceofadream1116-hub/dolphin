@@ -43,9 +43,9 @@ CMakeLists.txt.user
 /.vscode/
 # Ignore flatpak-builder's cache dir
 .flatpak-builder
-# clangd cache for Neovim
-.cache/clangd
-# Ignore CMake user presets
-CMakeUserPresets.json
-# Ignore FetchContent source directory
-.FetchContent/
+# Ignore files created by WinRT/UWP support
+/Source/DolphinWinRT/Generated Files/winrt
+/Source/DolphinWinRT/Sys
+/Source/DolphinWinRT/BundleArtifacts
+/Source/AppPackages/
+/Source/x64/

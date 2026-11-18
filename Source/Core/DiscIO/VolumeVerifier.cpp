@@ -5,11 +5,14 @@
 
 #include <algorithm>
 #include <future>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 
+#include <mbedtls/md5.h>
 #include <mz.h>
 #include <mz_strm.h>
 #include <mz_zip.h>
@@ -95,14 +98,18 @@ void RedumpVerifier::Start(const Volume& volume)
     switch (download_state->status)
     {
     case DownloadStatus::FailButOldCacheAvailable:
-      ERROR_LOG_FMT(DISCIO, "Failed to fetch data from Redump.info, using old cached data instead");
+      ERROR_LOG_FMT(DISCIO, "Failed to fetch data from Redump.org, using old cached data instead");
       [[fallthrough]];
     case DownloadStatus::Success:
       return ScanDatfile(ReadDatfile(system), system);
 
+    case DownloadStatus::SystemNotAvailable:
+      m_result = {Status::Error, Common::GetStringT("Wii data is not public yet")};
+      return {};
+
     case DownloadStatus::Fail:
     default:
-      m_result = {Status::Error, Common::GetStringT("Failed to connect to Redump.info")};
+      m_result = {Status::Error, Common::GetStringT("Failed to connect to Redump.org")};
       return {};
     }
   });
@@ -116,14 +123,14 @@ static std::string GetPathForSystem(const std::string& system)
 RedumpVerifier::DownloadStatus RedumpVerifier::DownloadDatfile(const std::string& system,
                                                                DownloadStatus old_status)
 {
-  if (old_status == DownloadStatus::Success)
+  if (old_status == DownloadStatus::Success || old_status == DownloadStatus::SystemNotAvailable)
     return old_status;
 
   Common::HttpRequest request;
 
   const std::optional<std::vector<u8>> result =
-      request.Get("https://redump.info/datfile/" + system + "/serial,version",
-                  {{"User-Agent", Common::GetEmulatorName()}});
+      request.Get("http://redump.org/datfile/" + system + "/serial,version",
+                  {{"User-Agent", Common::GetScmRevStr()}});
 
   const std::string output_path = GetPathForSystem(system);
 
@@ -136,8 +143,13 @@ RedumpVerifier::DownloadStatus RedumpVerifier::DownloadDatfile(const std::string
   if (result->size() > 1 && (*result)[0] == '<' && (*result)[1] == '!')
   {
     // This is an HTML page, not a zip file like we want
-    return File::Exists(output_path) ? DownloadStatus::FailButOldCacheAvailable :
-                                       DownloadStatus::Fail;
+
+    if (File::Exists(output_path))
+      return DownloadStatus::FailButOldCacheAvailable;
+
+    const bool system_not_available_match =
+        Common::ContainsSubrange(*result, "System \"" + system + "\" doesn't exist.");
+    return system_not_available_match ? DownloadStatus::SystemNotAvailable : DownloadStatus::Fail;
   }
 
   File::CreateFullPath(output_path);
@@ -203,13 +215,13 @@ static std::vector<u8> ParseHash(const char* str)
   return hash;
 }
 
-std::vector<RedumpVerifier::PotentialMatch> RedumpVerifier::ScanDatfile(std::span<const u8> data,
+std::vector<RedumpVerifier::PotentialMatch> RedumpVerifier::ScanDatfile(const std::vector<u8>& data,
                                                                         const std::string& system)
 {
   pugi::xml_document doc;
   if (!doc.load_buffer(data.data(), data.size()))
   {
-    m_result = {Status::Error, Common::GetStringT("Failed to parse Redump.info data")};
+    m_result = {Status::Error, Common::GetStringT("Failed to parse Redump.org data")};
     return {};
   }
 
@@ -307,8 +319,8 @@ std::vector<RedumpVerifier::PotentialMatch> RedumpVerifier::ScanDatfile(std::spa
         "Serial and/or version data is missing from {0}\n"
         "Please append \"{1}\" (without the quotes) to the datfile URL when downloading\n"
         "Example: {2}",
-        GetPathForSystem(system), "serial,version", "http://redump.info/datfile/gc/serial,version");
-    m_result = {Status::Error, Common::GetStringT("Failed to parse Redump.info data")};
+        GetPathForSystem(system), "serial,version", "http://redump.org/datfile/gc/serial,version");
+    m_result = {Status::Error, Common::GetStringT("Failed to parse Redump.org data")};
     return {};
   }
 
@@ -636,63 +648,42 @@ bool VolumeVerifier::CheckPartition(const Partition& partition)
   if (type == PARTITION_UPDATE)
   {
     const IOS::ES::TMDReader& tmd = m_volume.GetTMD(m_volume.GetGamePartition());
-    if (tmd.IsValid())
-    {
-      const u64 ios_ver = tmd.GetIOSId() & 0xFF;
-      bool has_correct_ios = false;
 
-      if (ios_ver == 9)
+    // IOS9 is the only IOS which can be assumed to exist in a working state on any Wii
+    // regardless of what updates have been installed. At least Mario Party 8
+    // (RM8E01, revision 2) uses IOS9 without having it in its update partition.
+    const u64 ios_ver = tmd.GetIOSId() & 0xFF;
+    bool has_correct_ios = tmd.IsValid() && ios_ver == 9;
+
+    if (!has_correct_ios && tmd.IsValid())
+    {
+      std::unique_ptr<FileInfo> file_info = filesystem->FindFileInfo("_sys");
+      if (file_info)
       {
-        // IOS9 is the only IOS which can be assumed to exist in a working state on any Wii
-        // regardless of what updates have been installed. At least Mario Party 8
-        // (RM8E01, revision 2) uses IOS9 without having it in its update partition.
-        has_correct_ios = true;
-      }
-      else
-      {
-        std::unique_ptr<FileInfo> file_info = filesystem->FindFileInfo("_sys");
-        if (file_info)
+        const std::string ios_ver_str = std::to_string(ios_ver);
+        const std::string correct_ios =
+            IsDebugSigned() ? ("firmware.64." + ios_ver_str + ".") : ("ios" + ios_ver_str + "-");
+        for (const FileInfo& f : *file_info)
         {
-          const std::string ios_ver_str = std::to_string(ios_ver);
-          const std::string correct_ios =
-              IsDebugSigned() ? ("firmware.64." + ios_ver_str + ".") : ("ios" + ios_ver_str + "-");
-          for (const FileInfo& f : *file_info)
+          std::string file_name = f.GetName();
+          Common::ToLower(&file_name);
+          if (file_name.starts_with(correct_ios))
           {
-            std::string file_name = f.GetName();
-            Common::ToLower(&file_name);
-            if (file_name.starts_with(correct_ios))
-            {
-              has_correct_ios = true;
-              break;
-            }
+            has_correct_ios = true;
+            break;
           }
         }
       }
-
-      if (!has_correct_ios)
-      {
-        // This is reached for hacked dumps where the update partition has been replaced with
-        // a very old update partition so that no updates will be installed.
-        AddProblem(Severity::Low,
-                   Common::GetStringT(
-                       "The update partition does not contain the IOS used by this title."));
-      }
     }
-  }
 
-  const IOS::ES::TicketReader& ticket = m_volume.GetTicket(partition);
-  if (!ticket.IsValid())
-  {
-    AddProblem(severity,
-               // i18n: "Ticket" here is a kind of digital authorization to use a certain title
-               // (e.g. a game)
-               Common::FmtFormatT("The {0} partition does not have a valid ticket.", name));
-  }
-
-  const IOS::ES::TMDReader& tmd = m_volume.GetTMD(partition);
-  if (!tmd.IsValid())
-  {
-    AddProblem(severity, Common::FmtFormatT("The {0} partition does not have a valid TMD.", name));
+    if (!has_correct_ios)
+    {
+      // This is reached for hacked dumps where the update partition has been replaced with
+      // a very old update partition so that no updates will be installed.
+      AddProblem(
+          Severity::Low,
+          Common::GetStringT("The update partition does not contain the IOS used by this title."));
+    }
   }
 
   return true;
@@ -992,28 +983,18 @@ void VolumeVerifier::CheckMisc()
     auto& es = ios.GetESCore();
     const std::vector<u8>& cert_chain = m_volume.GetCertificateChain(PARTITION_NONE);
 
-    if (!m_ticket.IsValid())
-    {
-      // i18n: "Ticket" here is a kind of digital authorization to use a certain title (e.g. a game)
-      AddProblem(Severity::High, Common::GetStringT("The ticket is invalid."));
-    }
-    else if (IOS::HLE::IPC_SUCCESS !=
-             es.VerifyContainer(IOS::HLE::ESCore::VerifyContainerType::Ticket,
-                                IOS::HLE::ESCore::VerifyMode::DoNotUpdateCertStore, m_ticket,
-                                cert_chain))
+    if (IOS::HLE::IPC_SUCCESS !=
+        es.VerifyContainer(IOS::HLE::ESCore::VerifyContainerType::Ticket,
+                           IOS::HLE::ESCore::VerifyMode::DoNotUpdateCertStore, m_ticket,
+                           cert_chain))
     {
       // i18n: "Ticket" here is a kind of digital authorization to use a certain title (e.g. a game)
       AddProblem(Severity::Low, Common::GetStringT("The ticket is not correctly signed."));
     }
 
-    if (!tmd.IsValid())
-    {
-      AddProblem(Severity::High, Common::GetStringT("The TMD is invalid."));
-    }
-    else if (IOS::HLE::IPC_SUCCESS !=
-             es.VerifyContainer(IOS::HLE::ESCore::VerifyContainerType::TMD,
-                                IOS::HLE::ESCore::VerifyMode::DoNotUpdateCertStore, tmd,
-                                cert_chain))
+    if (IOS::HLE::IPC_SUCCESS !=
+        es.VerifyContainer(IOS::HLE::ESCore::VerifyContainerType::TMD,
+                           IOS::HLE::ESCore::VerifyMode::DoNotUpdateCertStore, tmd, cert_chain))
     {
       AddProblem(
           Severity::Medium,
@@ -1086,7 +1067,8 @@ void VolumeVerifier::SetUpHashing()
 
   if (m_hashes_to_calculate.md5)
   {
-    m_md5_context.emplace();
+    mbedtls_md5_init(&m_md5_context);
+    mbedtls_md5_starts_ret(&m_md5_context);
   }
 
   if (m_hashes_to_calculate.sha1)
@@ -1229,7 +1211,7 @@ void VolumeVerifier::Process()
     if (m_hashes_to_calculate.md5)
     {
       m_md5_future = std::async(std::launch::async, [this, byte_increment] {
-        m_md5_context->Update(std::span{m_data}.first(byte_increment));
+        mbedtls_md5_update_ret(&m_md5_context, m_data.data(), byte_increment);
       });
     }
 
@@ -1322,7 +1304,7 @@ void VolumeVerifier::Finish()
     if (m_hashes_to_calculate.md5)
     {
       m_result.hashes.md5 = std::vector<u8>(16);
-      m_md5_context->Finish(m_result.hashes.md5.data());
+      mbedtls_md5_finish_ret(&m_md5_context, m_result.hashes.md5.data());
     }
 
     if (m_hashes_to_calculate.sha1)
@@ -1378,7 +1360,7 @@ void VolumeVerifier::Finish()
     else
     {
       m_result.summary_text =
-          Common::GetStringT("This is a good dump according to Redump.info, but Dolphin has found "
+          Common::GetStringT("This is a good dump according to Redump.org, but Dolphin has found "
                              "problems. This might be a bug in Dolphin.");
     }
     return;

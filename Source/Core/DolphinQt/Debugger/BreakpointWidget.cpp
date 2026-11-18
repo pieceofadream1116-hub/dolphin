@@ -78,7 +78,7 @@ private:
     opt.decorationSize = QSize(0, 0);
 
     // Default draw command for paint.
-    QApplication::style()->drawControl(QStyle::CE_ItemViewItem, &opt, painter, nullptr);
+    QApplication::style()->drawControl(QStyle::CE_ItemViewItem, &opt, painter, 0);
 
     // Draw pixmap at the center of the tablewidget cell
     QPixmap pix = qvariant_cast<QPixmap>(index.data(Qt::DecorationRole));
@@ -98,7 +98,8 @@ BreakpointWidget::BreakpointWidget(QWidget* parent)
   setWindowTitle(tr("Breakpoints"));
   setObjectName(QStringLiteral("breakpoints"));
 
-  setHidden(!Settings::Instance().IsBreakpointsVisible() || !Config::IsDebuggingEnabled());
+  setHidden(!Settings::Instance().IsBreakpointsVisible() ||
+            !Settings::Instance().IsDebugModeEnabled());
 
   setAllowedAreas(Qt::AllDockWidgetAreas);
 
@@ -118,8 +119,6 @@ BreakpointWidget::BreakpointWidget(QWidget* parent)
   });
 
   connect(m_table, &QTableWidget::itemChanged, this, &BreakpointWidget::OnItemChanged);
-  connect(&Settings::Instance(), &Settings::DebugFontChanged, this,
-          &BreakpointWidget::OnDebugFontChanged);
 
   connect(&Settings::Instance(), &Settings::BreakpointsVisibilityChanged, this,
           [this](bool visible) { setHidden(!visible); });
@@ -161,8 +160,6 @@ void BreakpointWidget::CreateWidgets()
   m_table->setSelectionMode(QAbstractItemView::NoSelection);
   m_table->verticalHeader()->hide();
 
-  OnDebugFontChanged(Settings::Instance().GetDebugFont());
-
   connect(m_table, &QTableWidget::itemClicked, this, &BreakpointWidget::OnClicked);
   connect(m_table, &QTableWidget::customContextMenuRequested, this,
           &BreakpointWidget::OnContextMenu);
@@ -176,7 +173,6 @@ void BreakpointWidget::CreateWidgets()
   layout->setContentsMargins(2, 2, 2, 2);
   layout->setSpacing(0);
 
-  m_enabled = m_toolbar->addAction(tr("Disable"), this, &BreakpointWidget::OnToggleBreaking);
   m_new = m_toolbar->addAction(tr("New"), this, &BreakpointWidget::OnNewBreakpoint);
   m_clear = m_toolbar->addAction(tr("Clear"), this, &BreakpointWidget::OnClear);
 
@@ -194,10 +190,6 @@ void BreakpointWidget::CreateWidgets()
 
 void BreakpointWidget::UpdateIcons()
 {
-  if (m_system.GetPowerPC().GetBreakPoints().IsBreakingEnabled())
-    m_enabled->setIcon(Resources::GetThemeIcon("pause"));
-  else
-    m_enabled->setIcon(Resources::GetThemeIcon("play"));
   m_new->setIcon(Resources::GetThemeIcon("debugger_add_breakpoint"));
   m_clear->setIcon(Resources::GetThemeIcon("debugger_clear"));
   m_load->setIcon(Resources::GetThemeIcon("debugger_load"));
@@ -297,29 +289,6 @@ void BreakpointWidget::Update()
   QPixmap enabled_icon =
       Resources::GetThemeIcon("debugger_breakpoint").pixmap(QSize(downscale, downscale));
 
-  auto& power_pc = m_system.GetPowerPC();
-  auto& breakpoints = power_pc.GetBreakPoints();
-
-  if (!breakpoints.IsBreakingEnabled())
-  {
-    // Use QPainter to draw a transparent hole in the center
-    QImage image = enabled_icon.toImage().convertToFormat(QImage::Format_ARGB32_Premultiplied);
-    QPainter painter(&image);
-    painter.setCompositionMode(QPainter::CompositionMode_Source);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(Qt::transparent);
-
-    const float icon_radius = image.deviceIndependentSize().height() / 2.0f;
-    const float gap_radius = icon_radius / 2.0f;
-    const QPointF center(icon_radius, icon_radius);
-
-    painter.drawEllipse(center, gap_radius, gap_radius);
-    painter.end();
-
-    enabled_icon = QPixmap::fromImage(image);
-  }
-
   const auto create_item = [](const QString& string = {}) {
     QTableWidgetItem* item = new QTableWidgetItem(string);
     item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
@@ -337,6 +306,8 @@ void BreakpointWidget::Update()
       Settings::Instance().IsThemeDark() ? QColor(75, 75, 75) : QColor(225, 225, 225);
   disabled_item.setBackground(disabled_color);
 
+  auto& power_pc = m_system.GetPowerPC();
+  auto& breakpoints = power_pc.GetBreakPoints();
   auto& memchecks = power_pc.GetMemChecks();
   auto& ppc_symbol_db = power_pc.GetSymbolDB();
 
@@ -495,36 +466,6 @@ void BreakpointWidget::OnEditBreakpoint(u32 address, bool is_instruction_bp)
   emit Host::GetInstance()->PPCBreakpointsChanged();
 }
 
-void BreakpointWidget::OnToggleBreaking()
-{
-  auto& breakpoints = m_system.GetPowerPC().GetBreakPoints();
-  auto& memchecks = m_system.GetPowerPC().GetMemChecks();
-  // Memcheck's HasAny() will report no memchecks while breaking is disabled, so only check when
-  // breaking is true.
-  bool has_memory_bp;
-
-  // Currently toggles all code and memory breakpoints. Could be split if needed.
-  if (breakpoints.IsBreakingEnabled())
-  {
-    has_memory_bp = memchecks.HasAny();
-    breakpoints.EnableBreaking(false);
-    memchecks.EnableBreaking(false);
-    m_enabled->setText(tr("Enable"));
-    m_enabled->setIcon(Resources::GetThemeIcon("play"));
-  }
-  else
-  {
-    breakpoints.EnableBreaking(true);
-    memchecks.EnableBreaking(true);
-    has_memory_bp = memchecks.HasAny();
-    m_enabled->setText(tr("Disable"));
-    m_enabled->setIcon(Resources::GetThemeIcon("pause"));
-  }
-
-  if (has_memory_bp || !breakpoints.GetBreakPoints().empty())
-    emit Host::GetInstance()->PPCBreakpointsChanged();
-}
-
 void BreakpointWidget::OnLoad()
 {
   Common::IniFile ini;
@@ -652,13 +593,6 @@ void BreakpointWidget::OnItemChanged(QTableWidgetItem* item)
       Update();
     }
   }
-}
-
-void BreakpointWidget::OnDebugFontChanged(const QFont& font)
-{
-  m_table->setFont(font);
-  m_table->verticalHeader()->setDefaultSectionSize(m_table->fontMetrics().height());
-  Update();
 }
 
 void BreakpointWidget::AddBP(u32 addr)

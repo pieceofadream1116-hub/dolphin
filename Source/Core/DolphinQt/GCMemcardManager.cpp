@@ -30,6 +30,8 @@
 #include "Common/CommonPaths.h"
 #include "Common/Config/Config.h"
 #include "Common/FileUtil.h"
+#include "Common/MsgHandler.h"
+#include "Common/StringUtil.h"
 #include "Common/VariantUtil.h"
 
 #include "Core/Config/MainSettings.h"
@@ -133,8 +135,6 @@ void GCMemcardManager::CreateWidgets()
     m_slot_create_button[slot] = new NonDefaultQPushButton(tr("&Create..."));
     m_slot_table[slot] = new QTableWidget;
     m_slot_table[slot]->setTabKeyNavigation(false);
-    m_slot_table[slot]->setHorizontalScrollMode(QAbstractItemView::ScrollMode::ScrollPerPixel);
-    m_slot_table[slot]->setVerticalScrollMode(QAbstractItemView::ScrollMode::ScrollPerPixel);
     m_slot_stat_label[slot] = new QLabel;
 
     m_slot_table[slot]->setSelectionMode(QAbstractItemView::ExtendedSelection);
@@ -243,6 +243,7 @@ void GCMemcardManager::SetActiveSlot(Slot slot)
 
   m_active_slot = slot;
 
+  UpdateSlotTable(slot);
   UpdateActions();
 }
 
@@ -328,7 +329,7 @@ void GCMemcardManager::UpdateActions()
   m_fix_checksums_button->setEnabled(have_memcard);
 }
 
-void GCMemcardManager::SetSlotFile(Slot slot, const QString& path)
+void GCMemcardManager::SetSlotFile(Slot slot, QString path)
 {
   auto [error_code, memcard] = Memcard::GCMemcard::Open(path.toStdString());
 

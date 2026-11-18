@@ -5,7 +5,6 @@
 
 #include <functional>
 #include <memory>
-#include <span>
 #include <string>
 #include <vector>
 
@@ -23,9 +22,9 @@ public:
   ARCUnpacker() { Reset(); }
   void Reset();
 
-  void AddBytes(std::span<const u8> bytes);
+  void AddBytes(const std::vector<u8>& bytes);
 
-  using WriteCallback = std::function<void(const std::string&, std::span<const u8>)>;
+  using WriteCallback = std::function<void(const std::string&, const std::vector<u8>&)>;
   void Extract(const WriteCallback& callback);
 
 private:

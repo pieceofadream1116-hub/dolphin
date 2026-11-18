@@ -33,8 +33,7 @@ struct alignas(16) PixelShaderConstants
   float4 zslope;
   std::array<float, 2> efbscale;  // .xy
 
-  // Constants from here onwards are mainly used in ubershaders. Specialized shaders also use
-  // pack2 and konst.
+  // Constants from here onwards are only used in ubershaders, other than pack2.
   u32 genmode;                  // .z
   u32 alphaTest;                // .w
   u32 fogParam3;                // .x

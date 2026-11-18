@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-#include "Common/BitSet.h"
 #include "Common/CommonTypes.h"
 #include "Core/PowerPC/Expression.h"
 
@@ -67,7 +66,7 @@ public:
   void AddFromStrings(const TBreakPointsStr& bp_strings);
 
   bool IsAddressBreakPoint(u32 address) const;
-  bool IsBreakPointEnable(u32 address) const;
+  bool IsBreakPointEnable(u32 adresss) const;
   // Get the breakpoint in this address (for most purposes)
   const TBreakPoint* GetBreakpoint(u32 address) const;
   // Get the breakpoint in this address (ignore temporary breakpoint, e.g. for editing purposes)
@@ -87,9 +86,6 @@ public:
   bool ToggleBreakPoint(u32 address);
   bool ToggleEnable(u32 address);
 
-  void EnableBreaking(bool enable);
-  bool IsBreakingEnabled() const { return m_breaking_enabled; }
-
   // Remove Breakpoint. Returns whether it was removed.
   bool Remove(u32 address);
   void Clear();
@@ -99,7 +95,6 @@ private:
   TBreakPoints m_breakpoints;
   std::optional<TBreakPoint> m_temp_breakpoint;
   Core::System& m_system;
-  bool m_breaking_enabled = true;
 };
 
 class DelayedMemCheckUpdate;
@@ -130,26 +125,14 @@ public:
   bool OverlapsMemcheck(u32 address, u32 length) const;
   DelayedMemCheckUpdate Remove(u32 address);
 
-  void EnableBreaking(bool enable);
-  bool IsBreakingEnabled() const { return m_breaking_enabled; }
-
   void Update();
   void Clear();
-  bool HasAny() const { return !m_mem_checks.empty() && m_breaking_enabled; }
-
-  BitSet32 GetGPRsUsedInConditions() { return m_gprs_used_in_conditions; }
-  BitSet32 GetFPRsUsedInConditions() { return m_fprs_used_in_conditions; }
+  bool HasAny() const { return !m_mem_checks.empty(); }
 
 private:
-  // Returns whether any change was made
-  bool UpdateRegistersUsedInConditions();
-
   TMemChecks m_mem_checks;
   Core::System& m_system;
-  BitSet32 m_gprs_used_in_conditions;
-  BitSet32 m_fprs_used_in_conditions;
   bool m_mem_breakpoints_set = false;
-  bool m_breaking_enabled = true;
 };
 
 class DelayedMemCheckUpdate final

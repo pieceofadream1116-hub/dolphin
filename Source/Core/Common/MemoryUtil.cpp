@@ -5,8 +5,10 @@
 
 #include <cstddef>
 #include <cstdlib>
+#include <string>
 
 #include "Common/CommonFuncs.h"
+#include "Common/CommonTypes.h"
 #include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
 
@@ -14,11 +16,10 @@
 #include <windows.h>
 #include "Common/StringUtil.h"
 #else
+#include <pthread.h>
 #include <stdio.h>
 #include <sys/mman.h>
-#if defined(_M_ARM_64) && defined(__APPLE__)
-#include <pthread.h>
-#endif
+#include <sys/types.h>
 #if defined __APPLE__ || defined __FreeBSD__ || defined __OpenBSD__ || defined __NetBSD__
 #include <sys/sysctl.h>
 #elif defined __HAIKU__

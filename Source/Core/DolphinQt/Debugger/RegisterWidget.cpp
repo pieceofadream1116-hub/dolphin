@@ -12,12 +12,9 @@
 #include <QTableWidget>
 #include <QVBoxLayout>
 
-#include <fmt/format.h>
-
 #include "Core/Core.h"
 #include "Core/Debugger/CodeTrace.h"
 #include "Core/HW/ProcessorInterface.h"
-#include "Core/PowerPC/MMU.h"
 #include "Core/PowerPC/PowerPC.h"
 #include "Core/System.h"
 #include "DolphinQt/Host.h"
@@ -29,7 +26,8 @@ RegisterWidget::RegisterWidget(QWidget* parent)
   setWindowTitle(tr("Registers"));
   setObjectName(QStringLiteral("registers"));
 
-  setHidden(!Settings::Instance().IsRegistersVisible() || !Config::IsDebuggingEnabled());
+  setHidden(!Settings::Instance().IsRegistersVisible() ||
+            !Settings::Instance().IsDebugModeEnabled());
 
   setAllowedAreas(Qt::AllDockWidgetAreas);
 
@@ -81,10 +79,10 @@ void RegisterWidget::CreateWidgets()
   m_table->setColumnCount(9);
 
   m_table->verticalHeader()->setVisible(false);
+  m_table->verticalHeader()->setDefaultSectionSize(24);
   m_table->setContextMenuPolicy(Qt::CustomContextMenu);
   m_table->setSelectionMode(QAbstractItemView::NoSelection);
-
-  OnDebugFontChanged(Settings::Instance().GetDebugFont());
+  m_table->setFont(Settings::Instance().GetDebugFont());
 
   QStringList empty_list;
 
@@ -107,28 +105,13 @@ void RegisterWidget::ConnectWidgets()
   connect(m_table, &QTableWidget::customContextMenuRequested, this,
           &RegisterWidget::ShowContextMenu);
   connect(m_table, &QTableWidget::itemChanged, this, &RegisterWidget::OnItemChanged);
-  connect(&Settings::Instance(), &Settings::DebugFontChanged, this,
-          &RegisterWidget::OnDebugFontChanged);
+  connect(&Settings::Instance(), &Settings::DebugFontChanged, m_table, &RegisterWidget::setFont);
 }
 
 void RegisterWidget::OnItemChanged(QTableWidgetItem* item)
 {
   if (!item->data(DATA_TYPE).isNull() && !m_updating)
     static_cast<RegisterColumn*>(item)->SetValue();
-}
-
-void RegisterWidget::OnDebugFontChanged(const QFont& font)
-{
-  if (m_table)
-  {
-    m_table->setFont(font);
-    const auto fontHeight = m_table->fontMetrics().height();
-    m_table->verticalHeader()->setDefaultSectionSize(fontHeight);
-
-    // Header height doesn't have to be great. As there are no labels, its only purpose is to make
-    // columns resizable.
-    m_table->horizontalHeader()->setFixedHeight(fontHeight * 5 / 4);
-  }
 }
 
 void RegisterWidget::ShowContextMenu()
@@ -284,14 +267,12 @@ void RegisterWidget::ShowContextMenu()
                          view_double_column})
     {
       connect(action, &QAction::triggered, [this, action] {
-        m_updating = true;
         auto col = m_table->currentItem()->column();
         for (int i = 0; i < 32; i++)
         {
           auto* update_item = static_cast<RegisterColumn*>(m_table->item(i, col));
           update_item->SetDisplay(static_cast<RegisterDisplay>(action->data().toInt()));
         }
-        m_updating = false;
       });
     }
 
@@ -339,13 +320,13 @@ void RegisterWidget::PopulateTable()
   {
     // General purpose registers (int)
     AddRegister(
-        i, 0, RegisterType::gpr, fmt::format("r{}", i),
+        i, 0, RegisterType::gpr, "r" + std::to_string(i),
         [this, i] { return m_system.GetPPCState().gpr[i]; },
         [this, i](u64 value) { m_system.GetPPCState().gpr[i] = value; });
 
     // Floating point registers (double)
     AddRegister(
-        i, 2, RegisterType::fpr, fmt::format("f{}", i),
+        i, 2, RegisterType::fpr, "f" + std::to_string(i),
         [this, i] { return m_system.GetPPCState().ps[i].PS0AsU64(); },
         [this, i](u64 value) { m_system.GetPPCState().ps[i].SetPS0(value); });
 
@@ -361,7 +342,7 @@ void RegisterWidget::PopulateTable()
   {
     // IBAT registers
     AddRegister(
-        i, 5, RegisterType::ibat, fmt::format("IBAT{}", i),
+        i, 5, RegisterType::ibat, "IBAT" + std::to_string(i),
         [this, i] {
           const auto& ppc_state = m_system.GetPPCState();
           return (static_cast<u64>(ppc_state.spr[SPR_IBAT0U + i * 2]) << 32) +
@@ -369,7 +350,7 @@ void RegisterWidget::PopulateTable()
         },
         nullptr);
     AddRegister(
-        i + 4, 5, RegisterType::ibat, fmt::format("IBAT{}", 4 + i),
+        i + 4, 5, RegisterType::ibat, "IBAT" + std::to_string(4 + i),
         [this, i] {
           const auto& ppc_state = m_system.GetPPCState();
           return (static_cast<u64>(ppc_state.spr[SPR_IBAT4U + i * 2]) << 32) +
@@ -379,7 +360,7 @@ void RegisterWidget::PopulateTable()
 
     // DBAT registers
     AddRegister(
-        i + 8, 5, RegisterType::dbat, fmt::format("DBAT{}", i),
+        i + 8, 5, RegisterType::dbat, "DBAT" + std::to_string(i),
         [this, i] {
           const auto& ppc_state = m_system.GetPPCState();
           return (static_cast<u64>(ppc_state.spr[SPR_DBAT0U + i * 2]) << 32) +
@@ -387,7 +368,7 @@ void RegisterWidget::PopulateTable()
         },
         nullptr);
     AddRegister(
-        i + 12, 5, RegisterType::dbat, fmt::format("DBAT{}", 4 + i),
+        i + 12, 5, RegisterType::dbat, "DBAT" + std::to_string(4 + i),
         [this, i] {
           const auto& ppc_state = m_system.GetPPCState();
           return (static_cast<u64>(ppc_state.spr[SPR_DBAT4U + i * 2]) << 32) +
@@ -400,7 +381,7 @@ void RegisterWidget::PopulateTable()
   {
     // Graphics quantization registers
     AddRegister(
-        i + 16, 7, RegisterType::gqr, fmt::format("GQR{}", i),
+        i + 16, 7, RegisterType::gqr, "GQR" + std::to_string(i),
         [this, i] { return m_system.GetPPCState().spr[SPR_GQR0 + i]; }, nullptr);
   }
 
@@ -422,12 +403,9 @@ void RegisterWidget::PopulateTable()
   {
     // SR registers
     AddRegister(
-        i, 7, RegisterType::sr, fmt::format("SR{}", i),
+        i, 7, RegisterType::sr, "SR" + std::to_string(i),
         [this, i] { return m_system.GetPPCState().sr[i]; },
-        [this, i](u64 value) {
-          m_system.GetPPCState().sr[i] = value;
-          m_system.GetMMU().SRUpdated();
-        });
+        [this, i](u64 value) { m_system.GetPPCState().sr[i] = value; });
   }
 
   // Special registers
@@ -471,7 +449,7 @@ void RegisterWidget::PopulateTable()
       23, 5, RegisterType::msr, "MSR", [this] { return m_system.GetPPCState().msr.Hex; },
       [this](u64 value) {
         m_system.GetPPCState().msr.Hex = value;
-        m_system.GetPowerPC().MSRUpdated();
+        PowerPC::MSRUpdated(m_system.GetPPCState());
       });
 
   // SRR 0-1
@@ -512,7 +490,7 @@ void RegisterWidget::PopulateTable()
       31, 5, RegisterType::pt_hashmask, "Hash Mask",
       [this] {
         const auto& ppc_state = m_system.GetPPCState();
-        return ppc_state.pagetable_mask | ppc_state.pagetable_base;
+        return (ppc_state.pagetable_hashmask << 6) | ppc_state.pagetable_base;
       },
       nullptr);
 
@@ -520,9 +498,8 @@ void RegisterWidget::PopulateTable()
   m_table->resizeColumnsToContents();
 }
 
-void RegisterWidget::AddRegister(int row, int column, RegisterType type,
-                                 const std::string& register_name, std::function<u64()> get_reg,
-                                 std::function<void(u64)> set_reg)
+void RegisterWidget::AddRegister(int row, int column, RegisterType type, std::string register_name,
+                                 std::function<u64()> get_reg, std::function<void(u64)> set_reg)
 {
   auto* value = new RegisterColumn(type, std::move(get_reg), std::move(set_reg));
 

@@ -48,6 +48,6 @@ TEST(WorkQueueThread, Simple)
 
   worker.Push(2);
   worker.WaitForCompletion();
-  // Still running after cancellation.
+  // Still running after cancelation.
   EXPECT_EQ(x, 2);
 }

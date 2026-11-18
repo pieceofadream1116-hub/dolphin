@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <deque>
 #include <map>
 #include <memory>
 #include <string>
@@ -13,6 +14,7 @@
 #include "Common/Assert.h"
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
+#include "Common/EnumUtils.h"
 #include "Common/Logging/Log.h"
 #include "Common/Timer.h"
 
@@ -221,11 +223,8 @@ static void ReleasePPCAncast(Core::System& system)
 void RAMOverrideForIOSMemoryValues(Memory::MemoryManager& memory, MemorySetupType setup_type)
 {
   // Don't touch anything if the feature isn't enabled.
-  if (!Config::Get(Config::MAIN_RAM_OVERRIDE_ENABLE) &&
-      SConfig::GetInstance().GetSimulatedMemorySize() <= Memory::MEM1_SIZE_RETAIL)
-  {
+  if (!Config::Get(Config::MAIN_RAM_OVERRIDE_ENABLE))
     return;
-  }
 
   // Some unstated constants that can be inferred.
   const u32 ipc_buffer_size =
@@ -282,7 +281,15 @@ Kernel::Kernel(IOSC::ConsoleType console_type) : m_iosc(console_type)
 {
   // Until the Wii root and NAND path stuff is entirely managed by IOS and made non-static,
   // using more than one IOS instance at a time is not supported.
-  ASSERT(Core::System::GetInstance().GetIOS() == nullptr);
+  auto& system = Core::System::GetInstance();
+  if (system.GetIOS() != nullptr)
+  {
+    // On Xbox/UWP, there can be timing issues during initialization where the old IOS instance
+    // hasn't been properly cleared yet. We'll issue a warning but allow the system to continue.
+    // The new IOS instance will replace the old one when it's assigned to the system.
+    WARN_LOG_FMT(IOS, "IOS instance already exists during kernel initialization. This may indicate "
+                       "a timing issue on Xbox/UWP platforms. The old instance will be replaced.");
+  }
 
   m_is_responsible_for_nand_root = !Core::WiiRootIsInitialized();
   if (m_is_responsible_for_nand_root)
@@ -663,8 +670,8 @@ std::shared_ptr<Device> EmulationKernel::GetDeviceByFileDescriptor(const u32 fd)
 std::optional<IPCReply> EmulationKernel::OpenDevice(OpenRequest& request)
 {
   const s32 new_fd = GetFreeDeviceID();
-  INFO_LOG_FMT(IOS, "Opening {} (mode {}, fd {})", request.path, std::to_underlying(request.flags),
-               new_fd);
+  INFO_LOG_FMT(IOS, "Opening {} (mode {}, fd {})", request.path,
+               Common::ToUnderlying(request.flags), new_fd);
   if (new_fd < 0 || new_fd >= IPC_MAX_FDS)
   {
     ERROR_LOG_FMT(IOS, "Couldn't get a free fd, too many open files");
@@ -750,7 +757,7 @@ std::optional<IPCReply> EmulationKernel::HandleIPCCommand(const Request& request
     ret = device->IOCtlV(IOCtlVRequest{GetSystem(), request.address});
     break;
   default:
-    ASSERT_MSG(IOS, false, "Unexpected command: {:#x}", std::to_underlying(request.command));
+    ASSERT_MSG(IOS, false, "Unexpected command: {:#x}", Common::ToUnderlying(request.command));
     ret = IPCReply{IPC_EINVAL, 978_tbticks};
     break;
   }

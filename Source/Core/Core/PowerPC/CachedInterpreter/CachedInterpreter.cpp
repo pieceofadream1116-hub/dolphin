@@ -7,6 +7,7 @@
 #include <sstream>
 #include <utility>
 
+#include <fmt/format.h>
 #include <fmt/ostream.h>
 
 #include "Common/CommonTypes.h"
@@ -31,11 +32,8 @@ CachedInterpreter::CachedInterpreter(Core::System& system) : JitBase(system), m_
 
 CachedInterpreter::~CachedInterpreter() = default;
 
-bool CachedInterpreter::Init()
+void CachedInterpreter::Init()
 {
-  if (!CheckValidity())
-    return false;
-
   RefreshConfig();
 
   AllocCodeSpace(CODE_SIZE);
@@ -43,14 +41,11 @@ bool CachedInterpreter::Init()
 
   jo.enableBlocklink = false;
 
-  if (!m_block_cache.Init())
-    return false;
+  m_block_cache.Init();
 
   code_block.m_stats = &js.st;
   code_block.m_gpa = &js.gpa;
   code_block.m_fpa = &js.fpa;
-
-  return true;
 }
 
 void CachedInterpreter::Shutdown()
@@ -71,25 +66,10 @@ void CachedInterpreter::ExecuteOneBlock()
   while (true)
   {
     const auto callback = *reinterpret_cast<const AnyCallback*>(normal_entry);
-    const u8* payload = normal_entry + sizeof(callback);
-    // Direct dispatch to the most commonly used callbacks for better performance
-    if (callback == AnyCallbackCast(Interpret<false>)) [[likely]]
-    {
-      Interpret<false>(ppc_state, *reinterpret_cast<const InterpretOperands*>(payload));
-      normal_entry = payload + sizeof(InterpretOperands);
-    }
-    else if (callback == AnyCallbackCast(Interpret<true>))
-    {
-      Interpret<true>(ppc_state, *reinterpret_cast<const InterpretOperands*>(payload));
-      normal_entry = payload + sizeof(InterpretOperands);
-    }
+    if (const auto distance = callback(ppc_state, normal_entry + sizeof(callback)))
+      normal_entry += distance;
     else
-    {
-      if (const auto distance = callback(ppc_state, payload))
-        normal_entry += distance;
-      else
-        break;
-    }
+      break;
   }
 }
 
@@ -412,7 +392,7 @@ bool CachedInterpreter::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
               operands);
       }
 
-      if (js.op->branchAction == PPCAnalyst::BranchAction::IdleLoop)
+      if (op.branchIsIdleLoop)
         Write(CheckIdle, {m_system.GetCoreTiming(), js.blockStart});
       if (op.canEndBlock)
         WriteEndBlock();

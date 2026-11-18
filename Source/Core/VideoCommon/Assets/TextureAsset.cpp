@@ -176,20 +176,16 @@ bool TextureAndSamplerData::FromJson(const CustomAssetLibrary::AssetID& asset_id
 
   if (type == "texture2d")
   {
-    data->type = AbstractTextureType::Texture_2D;
+    data->m_type = TextureAndSamplerData::Type::Type_Texture2D;
 
-    if (!ParseSampler(asset_id, json, &data->sampler))
+    if (!ParseSampler(asset_id, json, &data->m_sampler))
     {
       return false;
     }
   }
   else if (type == "texturecube")
   {
-    data->type = AbstractTextureType::Texture_CubeMap;
-  }
-  else if (type == "texture2darray")
-  {
-    data->type = AbstractTextureType::Texture_2DArray;
+    data->m_type = TextureAndSamplerData::Type::Type_TextureCube;
   }
   else
   {
@@ -209,16 +205,15 @@ void TextureAndSamplerData::ToJson(picojson::object* obj, const TextureAndSample
     return;
 
   auto& json_obj = *obj;
-  switch (data.type)
+  switch (data.m_type)
   {
-  case AbstractTextureType::Texture_2D:
+  case TextureAndSamplerData::Type::Type_Texture2D:
     json_obj.emplace("type", "texture2d");
     break;
-  case AbstractTextureType::Texture_CubeMap:
+  case TextureAndSamplerData::Type::Type_TextureCube:
     json_obj.emplace("type", "texturecube");
     break;
-  case AbstractTextureType::Texture_2DArray:
-    json_obj.emplace("type", "texture2darray");
+  case TextureAndSamplerData::Type::Type_Undefined:
     break;
   };
 
@@ -248,35 +243,20 @@ void TextureAndSamplerData::ToJson(picojson::object* obj, const TextureAndSample
   };
 
   picojson::object wrap_mode;
-  wrap_mode.emplace("u", wrap_mode_to_string(data.sampler.tm0.wrap_u));
-  wrap_mode.emplace("v", wrap_mode_to_string(data.sampler.tm0.wrap_v));
+  wrap_mode.emplace("u", wrap_mode_to_string(data.m_sampler.tm0.wrap_u));
+  wrap_mode.emplace("v", wrap_mode_to_string(data.m_sampler.tm0.wrap_v));
   json_obj.emplace("wrap_mode", wrap_mode);
 
   picojson::object filter_mode;
-  filter_mode.emplace("min", filter_mode_to_string(data.sampler.tm0.min_filter));
-  filter_mode.emplace("mag", filter_mode_to_string(data.sampler.tm0.mag_filter));
-  filter_mode.emplace("mipmap", filter_mode_to_string(data.sampler.tm0.mipmap_filter));
+  filter_mode.emplace("min", filter_mode_to_string(data.m_sampler.tm0.min_filter));
+  filter_mode.emplace("mag", filter_mode_to_string(data.m_sampler.tm0.mag_filter));
+  filter_mode.emplace("mipmap", filter_mode_to_string(data.m_sampler.tm0.mipmap_filter));
   json_obj.emplace("filter_mode", filter_mode);
 }
 
 CustomAssetLibrary::LoadInfo TextureAsset::LoadImpl(const CustomAssetLibrary::AssetID& asset_id)
 {
   auto potential_data = std::make_shared<CustomTextureData>();
-  const auto loaded_info = m_owning_library->LoadTexture(asset_id, potential_data.get());
-  if (loaded_info.bytes_loaded == 0)
-    return {};
-  {
-    std::lock_guard lk(m_data_lock);
-    m_loaded = true;
-    m_data = std::move(potential_data);
-  }
-  return loaded_info;
-}
-
-CustomAssetLibrary::LoadInfo
-TextureAndSamplerAsset::LoadImpl(const CustomAssetLibrary::AssetID& asset_id)
-{
-  auto potential_data = std::make_shared<TextureAndSamplerData>();
   const auto loaded_info = m_owning_library->LoadTexture(asset_id, potential_data.get());
   if (loaded_info.bytes_loaded == 0)
     return {};

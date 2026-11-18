@@ -66,7 +66,7 @@ class GameCoverKeyer : Keyer<GameFile> {
 }
 
 object CoilUtils {
-    val imageLoader = ImageLoader.Builder(DolphinApplication.getAppContext())
+    private val imageLoader = ImageLoader.Builder(DolphinApplication.getAppContext())
         .components {
             add(GameCoverKeyer())
             add(GameCoverFetcher.Factory())

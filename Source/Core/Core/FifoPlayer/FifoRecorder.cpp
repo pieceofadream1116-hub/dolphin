@@ -5,10 +5,10 @@
 
 #include <algorithm>
 #include <cstring>
-#include <utility>
 
 #include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
+#include "Common/Thread.h"
 
 #include "Core/HW/Memmap.h"
 #include "Core/System.h"
@@ -19,6 +19,7 @@
 #include "VideoCommon/TextureDecoder.h"
 #include "VideoCommon/VideoEvents.h"
 #include "VideoCommon/XFMemory.h"
+#include "VideoCommon/XFStructs.h"
 
 class FifoRecorder::FifoRecordAnalyzer : public OpcodeDecoder::Callback
 {
@@ -48,6 +49,11 @@ public:
   OPCODE_CALLBACK(void OnCommand(const u8* data, u32 size)) {}
 
   OPCODE_CALLBACK(CPState& GetCPState()) { return m_cpmem; }
+
+  OPCODE_CALLBACK(u32 GetVertexSize(u8 vat))
+  {
+    return VertexLoaderBase::GetVertexSize(GetCPState().vtx_desc, GetCPState().vtx_attr[vat]);
+  }
 
 private:
   void ProcessVertexComponent(CPArray array_index, VertexComponentFormat array_type,
@@ -247,10 +253,10 @@ void FifoRecorder::StartRecording(s32 numFrames, CallbackFunc finishedCb)
   }
 
   m_RequestedRecordingEnd = false;
-  m_FinishedCb = std::move(finishedCb);
+  m_FinishedCb = finishedCb;
 
-  m_end_of_frame_event =
-      m_system.GetVideoEvents().after_frame_event.Register([this](const Core::System& system) {
+  m_end_of_frame_event = AfterFrameEvent::Register(
+      [this](const Core::System& system) {
         const bool was_recording = OpcodeDecoder::g_record_fifo_data;
         OpcodeDecoder::g_record_fifo_data = IsRecording();
 
@@ -269,7 +275,8 @@ void FifoRecorder::StartRecording(s32 numFrames, CallbackFunc finishedCb)
         const auto& fifo = system.GetCommandProcessor().GetFifo();
         EndFrame(fifo.CPBase.load(std::memory_order_relaxed),
                  fifo.CPEnd.load(std::memory_order_relaxed));
-      });
+      },
+      "FifoRecorder::EndFrame");
 }
 
 void FifoRecorder::RecordInitialVideoMemory()

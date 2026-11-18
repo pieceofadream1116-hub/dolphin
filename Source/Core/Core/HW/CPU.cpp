@@ -8,6 +8,7 @@
 #include <queue>
 
 #include "AudioCommon/AudioCommon.h"
+#include "Common/CommonTypes.h"
 #include "Common/Event.h"
 #include "Common/Thread.h"
 #include "Common/Timer.h"
@@ -32,11 +33,7 @@ CPUManager::~CPUManager() = default;
 void CPUManager::Init(PowerPC::CPUCore cpu_core)
 {
   m_system.GetPowerPC().Init(cpu_core);
-
-  std::lock_guard state_lock(m_state_change_lock);
-  // A stop may have been requested while the core was booting, in which case don't overwrite it.
-  if (Core::GetState(m_system) != Core::State::Stopping)
-    m_state = State::Stepping;
+  m_state = State::Stepping;
 }
 
 void CPUManager::Shutdown()
@@ -75,8 +72,8 @@ void CPUManager::StartTimePlayedTimer()
 {
   Common::SetCurrentThreadName("Play Time Tracker");
 
-  // Use a clock that will appropriately ignore suspended system time.
-  Common::SteadyAwakeClock timer;
+  // Steady clock for greater accuracy of timing
+  std::chrono::steady_clock timer;
   auto prev_time = timer.now();
 
   while (true)
@@ -111,6 +108,10 @@ void CPUManager::StartTimePlayedTimer()
 void CPUManager::Run()
 {
   auto& power_pc = m_system.GetPowerPC();
+
+  // Updating the host CPU's rounding mode must be done on the CPU thread.
+  // We can't rely on PowerPC::Init doing it, since it's called from EmuThread.
+  PowerPC::RoundingModeUpdated(power_pc.GetPPCState());
 
   // Start a separate time tracker thread
   std::thread timing;
@@ -311,18 +312,16 @@ void CPUManager::SetStepping(bool stepping)
   {
     SetStateLocked(State::Stepping);
 
-    if (!Core::IsCPUThread())
+    while (m_state_cpu_thread_active)
     {
-      while (m_state_cpu_thread_active)
-        m_state_cpu_idle_cvar.wait(state_lock);
+      m_state_cpu_idle_cvar.wait(state_lock);
     }
 
     RunAdjacentSystems(false);
   }
   else if (SetStateLocked(State::Running))
   {
-    if (!Core::IsCPUThread())
-      m_state_cpu_cvar.notify_one();
+    m_state_cpu_cvar.notify_one();
     m_time_played_finish_sync.Set();
     RunAdjacentSystems(true);
   }
@@ -352,59 +351,67 @@ void CPUManager::Continue()
   Core::NotifyStateChanged(Core::State::Running);
 }
 
-bool CPUManager::PauseAndLock()
+bool CPUManager::PauseAndLock(bool do_lock, bool unpause_on_unlock, bool control_adjacent)
 {
-  m_stepping_lock.lock();
+  // NOTE: This is protected by m_stepping_lock.
+  static bool s_have_fake_cpu_thread = false;
+  bool was_unpaused = false;
 
-  std::unique_lock state_lock(m_state_change_lock);
-  m_state_paused_and_locked = true;
-
-  const bool was_unpaused = m_state == State::Running;
-  SetStateLocked(State::Stepping);
-
-  while (m_state_cpu_thread_active)
+  if (do_lock)
   {
-    m_state_cpu_idle_cvar.wait(state_lock);
+    m_stepping_lock.lock();
+
+    std::unique_lock state_lock(m_state_change_lock);
+    m_state_paused_and_locked = true;
+
+    was_unpaused = m_state == State::Running;
+    SetStateLocked(State::Stepping);
+
+    while (m_state_cpu_thread_active)
+    {
+      m_state_cpu_idle_cvar.wait(state_lock);
+    }
+
+    if (control_adjacent)
+      RunAdjacentSystems(false);
+    state_lock.unlock();
+
+    // NOTE: It would make more sense for Core::DeclareAsCPUThread() to keep a
+    //   depth counter instead of being a boolean.
+    if (!Core::IsCPUThread())
+    {
+      s_have_fake_cpu_thread = true;
+      Core::DeclareAsCPUThread();
+    }
   }
-
-  state_lock.unlock();
-
-  // NOTE: It would make more sense for Core::DeclareAsCPUThread() to keep a
-  //   depth counter instead of being a boolean.
-  if (!Core::IsCPUThread())
+  else
   {
-    m_have_fake_cpu_thread = true;
-    Core::DeclareAsCPUThread();
-  }
+    // Only need the stepping lock for this
+    if (s_have_fake_cpu_thread)
+    {
+      s_have_fake_cpu_thread = false;
+      Core::UndeclareAsCPUThread();
+    }
 
+    {
+      std::lock_guard state_lock(m_state_change_lock);
+      if (m_state_system_request_stepping)
+      {
+        m_state_system_request_stepping = false;
+      }
+      else if (unpause_on_unlock && SetStateLocked(State::Running))
+      {
+        was_unpaused = true;
+      }
+      m_state_paused_and_locked = false;
+      m_state_cpu_cvar.notify_one();
+
+      if (control_adjacent)
+        RunAdjacentSystems(m_state == State::Running);
+    }
+    m_stepping_lock.unlock();
+  }
   return was_unpaused;
-}
-
-void CPUManager::RestoreStateAndUnlock(const bool unpause_on_unlock)
-{
-  // Only need the stepping lock for this
-  if (m_have_fake_cpu_thread)
-  {
-    m_have_fake_cpu_thread = false;
-    Core::UndeclareAsCPUThread();
-  }
-
-  {
-    std::lock_guard state_lock(m_state_change_lock);
-    if (m_state_system_request_stepping)
-    {
-      m_state_system_request_stepping = false;
-    }
-    else if (unpause_on_unlock)
-    {
-      SetStateLocked(State::Running);
-    }
-    m_state_paused_and_locked = false;
-    m_state_cpu_cvar.notify_one();
-
-    RunAdjacentSystems(m_state == State::Running);
-  }
-  m_stepping_lock.unlock();
 }
 
 void CPUManager::AddCPUThreadJob(Common::MoveOnlyFunction<void()> function)

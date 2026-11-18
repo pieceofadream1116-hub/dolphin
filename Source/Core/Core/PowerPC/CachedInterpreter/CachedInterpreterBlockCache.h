@@ -16,7 +16,7 @@ class CachedInterpreterBlockCache final : public JitBaseBlockCache
 public:
   explicit CachedInterpreterBlockCache(JitBase& jit);
 
-  [[nodiscard]] bool Init() override;
+  void Init() override;
 
   void DestroyBlock(JitBlock& block) override;
 

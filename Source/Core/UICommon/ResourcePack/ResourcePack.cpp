@@ -97,9 +97,10 @@ ResourcePack::ResourcePack(const std::string& path) : m_path(path)
 
   do
   {
+    std::string filename(256, '\0');
+
     mz_zip_file* texture_info;
     mz_zip_reader_entry_get_info(zip_reader, &texture_info);
-    std::string filename(texture_info->filename);
 
     if (!filename.starts_with("textures/") || texture_info->uncompressed_size == 0)
       continue;
@@ -304,7 +305,7 @@ bool ResourcePack::Uninstall(const std::string& path)
 
     while (dir.length() > (path + TEXTURE_PATH).length())
     {
-      const auto is_empty = Common::DoFileSearch(dir).empty();
+      auto is_empty = Common::DoFileSearch({dir}).empty();
 
       if (is_empty)
         File::DeleteDir(dir);

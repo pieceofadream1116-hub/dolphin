@@ -7,9 +7,25 @@
 
 #include "Common/scmrev.h"
 
+#ifdef WINRT_XBOX
+#include <objbase.h>
+#include <windows.applicationmodel.h>
+#include <winrt/Windows.ApplicationModel.Core.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.UI.Core.h>
+#include <winrt/windows.gaming.input.h>
+#include <winrt/windows.graphics.display.core.h>
+#include <gamingdeviceinformation.h>
+using namespace winrt::Windows::ApplicationModel;
+#endif
+
 namespace Common
 {
+#ifdef WINRT_XBOX
+#define EMULATOR_NAME "DolphinUWP"
+#else
 #define EMULATOR_NAME "Dolphin"
+#endif
 
 #ifdef _DEBUG
 #define BUILD_TYPE_STR "Debug "
@@ -19,11 +35,61 @@ namespace Common
 #define BUILD_TYPE_STR ""
 #endif
 
-const std::string& GetEmulatorName()
+#ifdef WINRT_XBOX
+
+std::string GetConsoleModelString()
 {
-  static const std::string emulator_name = EMULATOR_NAME;
-  return emulator_name;
+  std::string model;
+
+  // Get the Xbox model information
+  GAMING_DEVICE_MODEL_INFORMATION deviceInfo = {};
+
+  HRESULT hr = GetGamingDeviceModelInformation(&deviceInfo);
+
+  if (SUCCEEDED(hr))
+  {
+    switch (deviceInfo.deviceId)
+    {
+    case GAMING_DEVICE_DEVICE_ID_XBOX_ONE:
+      model = "Xbox One";
+      break;
+    case GAMING_DEVICE_DEVICE_ID_XBOX_ONE_S:
+      model = "Xbox One S";
+      break;
+    case GAMING_DEVICE_DEVICE_ID_XBOX_ONE_X:
+      model = "Xbox One X";
+      break;
+    case GAMING_DEVICE_DEVICE_ID_XBOX_ONE_X_DEVKIT:
+      model = "Xbox One X Developer Kit";
+      break;
+    case GAMING_DEVICE_DEVICE_ID_XBOX_SERIES_S:
+      model = "Xbox Series S";
+      break;
+    case GAMING_DEVICE_DEVICE_ID_XBOX_SERIES_X:
+      model = "Xbox Series X";
+      break;
+    case GAMING_DEVICE_DEVICE_ID_XBOX_SERIES_X_DEVKIT:
+      model = "Xbox Series X Developer Kit";
+      break;
+    default:
+      model = "Unknown Xbox model";
+      break;
+    }
+  }
+  else
+  {
+    model = " Error detecting Xbox model";
+  }
+
+  return model;
 }
+
+void GetConsoleModelString(std::string& out_model)
+{
+  out_model = GetConsoleModelString();
+}
+
+#endif
 
 const std::string& GetScmRevStr()
 {
@@ -43,7 +109,7 @@ const std::string& GetScmRevStr()
 
 const std::string& GetScmRevGitStr()
 {
-  static const std::string scm_rev_git_str = SCM_REV_STR;
+  static const std::string scm_rev_git_str = "e6ed939952f108aeaedc2763b391f2471203305e";
   return scm_rev_git_str;
 }
 
@@ -61,7 +127,23 @@ const std::string& GetScmBranchStr()
 
 const std::string& GetUserAgentStr()
 {
-  static const std::string user_agent_str = EMULATOR_NAME "/" SCM_DESC_STR;
+  static const std::string user_agent_str = []() {
+    std::string version;
+#ifdef WINRT_XBOX
+    // Read full Package version from AppxManifest
+    auto pkg = winrt::Windows::ApplicationModel::Package::Current();
+    auto ver = pkg.Id().Version();
+    version = std::to_string(ver.Major) + "." + std::to_string(ver.Minor) + "." +
+              std::to_string(ver.Build) + "." + std::to_string(ver.Revision);
+    // Append console model in parentheses
+    const std::string model = GetConsoleModelString();
+    return std::string(EMULATOR_NAME) + "/" + version + " (" + model + ")";
+#else
+    // Fallback for desktop: use SCM description
+    version = SCM_DESC_STR;
+    return std::string(EMULATOR_NAME) + "/" + SCM_DESC_STR;
+#endif
+  }();
   return user_agent_str;
 }
 
@@ -80,15 +162,11 @@ const std::string& GetScmUpdateTrackStr()
 const std::string& GetNetplayDolphinVer()
 {
 #ifdef _WIN32
-  static const std::string netplay_dolphin_ver = SCM_DESC_STR " Windows";
+  static const std::string netplay_dolphin_ver = SCM_DESC_STR " Win";
 #elif __APPLE__
-  static const std::string netplay_dolphin_ver = SCM_DESC_STR " macOS";
-#elif ANDROID
-  static const std::string netplay_dolphin_ver = SCM_DESC_STR " Android";
-#elif __linux__
-  static const std::string netplay_dolphin_ver = SCM_DESC_STR " Linux";
+  static const std::string netplay_dolphin_ver = SCM_DESC_STR " Mac";
 #else
-  static const std::string netplay_dolphin_ver = SCM_DESC_STR;
+  static const std::string netplay_dolphin_ver = SCM_DESC_STR " Lin";
 #endif
   return netplay_dolphin_ver;
 }

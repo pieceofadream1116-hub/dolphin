@@ -14,7 +14,7 @@
 class PerformanceTracker
 {
 public:
-  PerformanceTracker(std::optional<std::string> log_name = std::nullopt,
+  PerformanceTracker(const std::optional<std::string> log_name = std::nullopt,
                      const std::optional<DT> sample_window_duration = std::nullopt);
   ~PerformanceTracker() = default;
 
@@ -44,6 +44,7 @@ public:
 private:
   void LogRenderTimeToFile(DT val);
 
+  void HandleRawDt(DT value);
   void PushFront(DT value);
   void PopBack();
 
@@ -63,12 +64,8 @@ private:
   // Amount of time to sample dt's over (defaults to config)
   const std::optional<DT> m_sample_window_duration;
 
-  // For calculating the average dt and standard deviation
-  // Using `double` because the alternative DT::rep (ns) risks causing an overflow, since
-  // RunningVariance stores the current std squared.
-  // (Even though it's basically impossible to achieve in practice, it'd need a
-  // more-than-a-minute long stutter followed by only almost-zero frametimes.)
-  MathUtil::RunningVariance<double> m_running_variance{};
+  // Queue + Running Total used to calculate average dt
+  DT m_dt_total = DT::zero();
   std::deque<DT> m_dt_queue;
 
   // Average rate/time throughout the window

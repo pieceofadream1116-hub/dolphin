@@ -7,11 +7,11 @@
 #include <string>
 #include <thread>
 
-#include <windows.h>
-#include <commctrl.h>
+#include <Windows.h>
+#include <CommCtrl.h>
+#include <ShObjIdl.h>
+#include <ShlObj.h>
 #include <shellapi.h>
-#include <shlobj.h>
-#include <shobjidl.h>
 #include <wrl/client.h>
 
 #include "Common/Event.h"
@@ -55,7 +55,7 @@ constexpr int PADDING_HEIGHT = 5;
 
 namespace UI
 {
-static bool InitWindow()
+bool InitWindow()
 {
   InitCommonControls();
 
@@ -78,7 +78,7 @@ static bool InitWindow()
     return false;
 
   if (SUCCEEDED(CoCreateInstance(CLSID_TaskbarList, nullptr, CLSCTX_INPROC_SERVER,
-                                 IID_PPV_ARGS(&taskbar_list))))
+                                 IID_PPV_ARGS(taskbar_list.GetAddressOf()))))
   {
     if (FAILED(taskbar_list->HrInit()))
     {
@@ -206,7 +206,7 @@ void SetDescription(const std::string& text)
   SetWindowText(label_handle, UTF8ToWString(text).c_str());
 }
 
-static void MessageLoop()
+void MessageLoop()
 {
   HRESULT result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 

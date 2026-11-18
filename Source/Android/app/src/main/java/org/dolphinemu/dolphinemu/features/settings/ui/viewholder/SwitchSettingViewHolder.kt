@@ -32,9 +32,6 @@ class SwitchSettingViewHolder(
         binding.textSettingName.text = item.name
         binding.textSettingDescription.text = item.description
 
-        // Make sure we don't trigger any listener set earlier
-        binding.settingSwitch.setOnCheckedChangeListener(null)
-
         binding.settingSwitch.isChecked = setting.isChecked
         binding.settingSwitch.isEnabled = setting.isEditable
 

@@ -8,6 +8,7 @@
 #include <mutex>
 #include <utility>
 
+#include <fmt/format.h>
 #include <fmt/ostream.h>
 
 #include "Core/HLE/HLE.h"

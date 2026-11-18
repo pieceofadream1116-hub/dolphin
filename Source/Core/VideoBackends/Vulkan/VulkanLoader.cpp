@@ -4,19 +4,21 @@
 #define VMA_IMPLEMENTATION
 #include "VideoBackends/Vulkan/VulkanLoader.h"
 
+#include <atomic>
+#include <cstdarg>
+#include <cstdlib>
+
 #if defined(ANDROID)
 #include <adrenotools/driver.h>
 #include <dlfcn.h>
 #endif
 
+#include "Common/CommonFuncs.h"
 #include "Common/DynamicLibrary.h"
-#if defined(__APPLE__)
 #include "Common/FileUtil.h"
-#elif defined(ANDROID) && _M_ARM_64
-#include "Common/FileUtil.h"
+#include "Common/StringUtil.h"
 
 #include "VideoCommon/VideoConfig.h"
-#endif
 
 #define VULKAN_MODULE_ENTRY_POINT(name, required) PFN_##name name;
 #define VULKAN_INSTANCE_ENTRY_POINT(name, required) PFN_##name name;
@@ -254,16 +256,9 @@ static bool CheckKgslPresent()
   return access(KgslPath, F_OK) == 0;
 }
 
-static bool CheckKbasePresent()
-{
-  constexpr auto KbasePath{"/dev/mali0"};
-
-  return access(KbasePath, F_OK) == 0;
-}
-
 bool SupportsCustomDriver()
 {
-  return android_get_device_api_level() >= 28 && (CheckKgslPresent() || CheckKbasePresent());
+  return android_get_device_api_level() >= 28 && CheckKgslPresent();
 }
 #endif
 

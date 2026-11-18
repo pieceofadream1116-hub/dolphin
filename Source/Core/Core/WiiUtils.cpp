@@ -22,6 +22,7 @@
 #include "Common/Assert.h"
 #include "Common/CommonTypes.h"
 #include "Common/Contains.h"
+#include "Common/EnumUtils.h"
 #include "Common/FileUtil.h"
 #include "Common/HttpRequest.h"
 #include "Common/Logging/Log.h"
@@ -79,7 +80,7 @@ static bool ImportWAD(IOS::HLE::Kernel& ios, const DiscIO::VolumeWAD& wad,
     if (ret != IOS::HLE::IOSC_FAIL_CHECKVALUE)
     {
       PanicAlertFmtT("WAD installation failed: Could not initialise title import (error {0}).",
-                     std::to_underlying(ret));
+                     Common::ToUnderlying(ret));
     }
     return false;
   }
@@ -329,13 +330,13 @@ std::string SystemUpdater::GetDeviceId()
   u32 ios_device_id;
   if (m_ios.GetESCore().GetDeviceId(&ios_device_id) < 0)
     return "";
-  return std::to_string((1ULL << 32) | ios_device_id);
+  return std::to_string((u64(1) << 32) | ios_device_id);
 }
 
 class OnlineSystemUpdater final : public SystemUpdater
 {
 public:
-  OnlineSystemUpdater(UpdateCallback update_callback, std::string region);
+  OnlineSystemUpdater(UpdateCallback update_callback, const std::string& region);
   UpdateResult DoOnlineUpdate();
 
 private:
@@ -346,7 +347,7 @@ private:
   };
 
   Response GetSystemTitles();
-  Response ParseTitlesResponse(std::span<const u8> response) const;
+  Response ParseTitlesResponse(const std::vector<u8>& response) const;
   bool ShouldInstallTitle(const TitleInfo& title);
 
   UpdateResult InstallTitleFromNUS(const std::string& prefix_url, const TitleInfo& title,
@@ -365,13 +366,13 @@ private:
   Common::HttpRequest m_http{std::chrono::minutes{3}};
 };
 
-OnlineSystemUpdater::OnlineSystemUpdater(UpdateCallback update_callback, std::string region)
-    : m_update_callback(std::move(update_callback)), m_requested_region(std::move(region))
+OnlineSystemUpdater::OnlineSystemUpdater(UpdateCallback update_callback, const std::string& region)
+    : m_update_callback(std::move(update_callback)), m_requested_region(region)
 {
 }
 
 OnlineSystemUpdater::Response
-OnlineSystemUpdater::ParseTitlesResponse(std::span<const u8> response) const
+OnlineSystemUpdater::ParseTitlesResponse(const std::vector<u8>& response) const
 {
   pugi::xml_document doc;
   pugi::xml_parse_result result = doc.load_buffer(response.data(), response.size());
@@ -545,7 +546,7 @@ UpdateResult OnlineSystemUpdater::InstallTitleFromNUS(const std::string& prefix_
   auto& es = m_ios.GetESCore();
   if ((ret = es.ImportTicket(ticket.first, ticket.second)) < 0)
   {
-    ERROR_LOG_FMT(CORE, "Failed to import ticket: error {}", std::to_underlying(ret));
+    ERROR_LOG_FMT(CORE, "Failed to import ticket: error {}", Common::ToUnderlying(ret));
     return UpdateResult::ImportFailed;
   }
 
@@ -577,7 +578,7 @@ UpdateResult OnlineSystemUpdater::InstallTitleFromNUS(const std::string& prefix_
   IOS::HLE::ESCore::Context context;
   if ((ret = es.ImportTitleInit(context, tmd.first.GetBytes(), tmd.second)) < 0)
   {
-    ERROR_LOG_FMT(CORE, "Failed to initialise title import: error {}", std::to_underlying(ret));
+    ERROR_LOG_FMT(CORE, "Failed to initialise title import: error {}", Common::ToUnderlying(ret));
     return UpdateResult::ImportFailed;
   }
 
@@ -596,7 +597,7 @@ UpdateResult OnlineSystemUpdater::InstallTitleFromNUS(const std::string& prefix_
       if ((ret = es.ImportContentBegin(context, title.id, content.id)) < 0)
       {
         ERROR_LOG_FMT(CORE, "Failed to initialise import for content {:08x}: error {}", content.id,
-                      std::to_underlying(ret));
+                      Common::ToUnderlying(ret));
         return UpdateResult::ImportFailed;
       }
 
@@ -621,7 +622,7 @@ UpdateResult OnlineSystemUpdater::InstallTitleFromNUS(const std::string& prefix_
   if ((all_contents_imported && (ret = es.ImportTitleDone(context)) < 0) ||
       (!all_contents_imported && (ret = es.ImportTitleCancel(context)) < 0))
   {
-    ERROR_LOG_FMT(CORE, "Failed to finalise title import: error {}", std::to_underlying(ret));
+    ERROR_LOG_FMT(CORE, "Failed to finalise title import: error {}", Common::ToUnderlying(ret));
     return UpdateResult::ImportFailed;
   }
 

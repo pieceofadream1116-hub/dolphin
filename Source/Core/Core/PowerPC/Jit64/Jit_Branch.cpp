@@ -6,6 +6,7 @@
 #include "Common/Assert.h"
 #include "Common/CommonTypes.h"
 #include "Common/x64Emitter.h"
+#include "Core/CoreTiming.h"
 #include "Core/Debugger/BranchWatch.h"
 #include "Core/PowerPC/Gekko.h"
 #include "Core/PowerPC/Jit64/RegCache/JitRegCache.h"
@@ -67,42 +68,65 @@ void Jit64::rfi(UGeckoInstruction inst)
 }
 
 template <bool condition>
-void Jit64::WriteBranchWatch(u32 origin, u32 destination, UGeckoInstruction inst,
-                             BitSet32 caller_save)
+void Jit64::WriteBranchWatch(u32 origin, u32 destination, UGeckoInstruction inst, X64Reg reg_a,
+                             X64Reg reg_b, BitSet32 caller_save)
 {
-  if (IsBranchWatchEnabled())
-  {
-    ABI_PushRegistersAndAdjustStack(caller_save, 0);
-    MOV(64, R(ABI_PARAM1), ImmPtr(&m_branch_watch));
-    MOV(64, R(ABI_PARAM2), Imm64(Core::FakeBranchWatchCollectionKey{origin, destination}));
-    MOV(32, R(ABI_PARAM3), Imm32(inst.hex));
-    ABI_CallFunction(m_ppc_state.msr.IR ? (condition ? &Core::BranchWatch::HitVirtualTrue_fk :
-                                                       &Core::BranchWatch::HitVirtualFalse_fk) :
-                                          (condition ? &Core::BranchWatch::HitPhysicalTrue_fk :
-                                                       &Core::BranchWatch::HitPhysicalFalse_fk));
-    ABI_PopRegistersAndAdjustStack(caller_save, 0);
-  }
+  MOV(64, R(reg_a), ImmPtr(&m_branch_watch));
+  MOVZX(32, 8, reg_b, MDisp(reg_a, Core::BranchWatch::GetOffsetOfRecordingActive()));
+  TEST(32, R(reg_b), R(reg_b));
+
+  FixupBranch branch_in = J_CC(CC_NZ, Jump::Near);
+  SwitchToFarCode();
+  SetJumpTarget(branch_in);
+
+  ABI_PushRegistersAndAdjustStack(caller_save, 0);
+  // Some call sites have an optimization to use ABI_PARAM1 as a scratch register.
+  if (reg_a != ABI_PARAM1)
+    MOV(64, R(ABI_PARAM1), R(reg_a));
+  MOV(64, R(ABI_PARAM2), Imm64(Core::FakeBranchWatchCollectionKey{origin, destination}));
+  MOV(32, R(ABI_PARAM3), Imm32(inst.hex));
+  ABI_CallFunction(m_ppc_state.msr.IR ? (condition ? &Core::BranchWatch::HitVirtualTrue_fk :
+                                                     &Core::BranchWatch::HitVirtualFalse_fk) :
+                                        (condition ? &Core::BranchWatch::HitPhysicalTrue_fk :
+                                                     &Core::BranchWatch::HitPhysicalFalse_fk));
+  ABI_PopRegistersAndAdjustStack(caller_save, 0);
+
+  FixupBranch branch_out = J(Jump::Near);
+  SwitchToNearCode();
+  SetJumpTarget(branch_out);
 }
 
-template void Jit64::WriteBranchWatch<true>(u32, u32, UGeckoInstruction, BitSet32);
-template void Jit64::WriteBranchWatch<false>(u32, u32, UGeckoInstruction, BitSet32);
+template void Jit64::WriteBranchWatch<true>(u32, u32, UGeckoInstruction, X64Reg, X64Reg, BitSet32);
+template void Jit64::WriteBranchWatch<false>(u32, u32, UGeckoInstruction, X64Reg, X64Reg, BitSet32);
 
-void Jit64::WriteBranchWatchDestInRSCRATCH(u32 origin, UGeckoInstruction inst, BitSet32 caller_save)
+void Jit64::WriteBranchWatchDestInRSCRATCH(u32 origin, UGeckoInstruction inst, X64Reg reg_a,
+                                           X64Reg reg_b, BitSet32 caller_save)
 {
-  if (IsBranchWatchEnabled())
-  {
-    // Assert RSCRATCH won't be clobbered before it is moved from.
-    static_assert(ABI_PARAM1 != RSCRATCH);
+  MOV(64, R(reg_a), ImmPtr(&m_branch_watch));
+  MOVZX(32, 8, reg_b, MDisp(reg_a, Core::BranchWatch::GetOffsetOfRecordingActive()));
+  TEST(32, R(reg_b), R(reg_b));
 
-    ABI_PushRegistersAndAdjustStack(caller_save, 0);
-    MOV(64, R(ABI_PARAM1), ImmPtr(&m_branch_watch));
-    MOV(32, R(ABI_PARAM3), R(RSCRATCH));
-    MOV(32, R(ABI_PARAM2), Imm32(origin));
-    MOV(32, R(ABI_PARAM4), Imm32(inst.hex));
-    ABI_CallFunction(m_ppc_state.msr.IR ? &Core::BranchWatch::HitVirtualTrue :
-                                          &Core::BranchWatch::HitPhysicalTrue);
-    ABI_PopRegistersAndAdjustStack(caller_save, 0);
-  }
+  FixupBranch branch_in = J_CC(CC_NZ, Jump::Near);
+  SwitchToFarCode();
+  SetJumpTarget(branch_in);
+
+  // Assert RSCRATCH won't be clobbered before it is moved from.
+  static_assert(ABI_PARAM1 != RSCRATCH);
+
+  ABI_PushRegistersAndAdjustStack(caller_save, 0);
+  // Some call sites have an optimization to use ABI_PARAM1 as a scratch register.
+  if (reg_a != ABI_PARAM1)
+    MOV(64, R(ABI_PARAM1), R(reg_a));
+  MOV(32, R(ABI_PARAM3), R(RSCRATCH));
+  MOV(32, R(ABI_PARAM2), Imm32(origin));
+  MOV(32, R(ABI_PARAM4), Imm32(inst.hex));
+  ABI_CallFunction(m_ppc_state.msr.IR ? &Core::BranchWatch::HitVirtualTrue :
+                                        &Core::BranchWatch::HitPhysicalTrue);
+  ABI_PopRegistersAndAdjustStack(caller_save, 0);
+
+  FixupBranch branch_out = J(Jump::Near);
+  SwitchToNearCode();
+  SetJumpTarget(branch_out);
 }
 
 void Jit64::bx(UGeckoInstruction inst)
@@ -110,16 +134,21 @@ void Jit64::bx(UGeckoInstruction inst)
   INSTRUCTION_START
   JITDISABLE(bJITBranchOff);
 
-  // We must always process the following sentence, even if branch following is inlining the
-  // function call.
+  // We must always process the following sentence
+  // even if the blocks are merged by PPCAnalyst::Flatten().
   if (inst.LK)
     MOV(32, PPCSTATE_LR, Imm32(js.compilerPC + 4));
 
-  // PPCAnalyzer::Analyze() followed the branch, thus the next instruction of the block is the
-  // destination of the branch, no need to do anything.
-  if (js.op->branchAction == PPCAnalyst::BranchAction::Follow)
+  // If this is not the last instruction of a block,
+  // we will skip the rest process.
+  // Because PPCAnalyst::Flatten() merged the blocks.
+  if (!js.isLastInstruction)
   {
-    WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, CallerSavedRegistersInUse());
+    if (IsDebuggingEnabled())
+    {
+      WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, RSCRATCH, RSCRATCH2,
+                             CallerSavedRegistersInUse());
+    }
     if (inst.LK && !js.op->skipLRStack)
     {
       // We have to fake the stack as the RET instruction was not
@@ -133,12 +162,16 @@ void Jit64::bx(UGeckoInstruction inst)
   gpr.Flush();
   fpr.Flush();
 
-  WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, {});
+  if (IsDebuggingEnabled())
+  {
+    // ABI_PARAM1 is safe to use after a GPR flush for an optimization in this function.
+    WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, ABI_PARAM1, RSCRATCH, {});
+  }
 #ifdef ACID_TEST
   if (inst.LK)
     AND(32, PPCSTATE(cr), Imm32(~(0xFF000000)));
 #endif
-  if (js.op->branchAction == PPCAnalyst::BranchAction::IdleLoop)
+  if (js.op->branchIsIdleLoop)
   {
     WriteIdleExit(js.op->branchTo);
   }
@@ -178,11 +211,17 @@ void Jit64::bcx(UGeckoInstruction inst)
   if (inst.LK)
     MOV(32, PPCSTATE_LR, Imm32(js.compilerPC + 4));
 
-  // PPCAnalyzer::Analyze() followed this unconditional branch, thus the next instruction of the
-  // block is the destination of the branch, no need to do anything.
-  if (js.op->branchAction == PPCAnalyst::BranchAction::Follow)
+  // If this is not the last instruction of a block
+  // and an unconditional branch, we will skip the rest process.
+  // Because PPCAnalyst::Flatten() merged the blocks.
+  if (!js.isLastInstruction && (inst.BO & BO_DONT_DECREMENT_FLAG) &&
+      (inst.BO & BO_DONT_CHECK_CONDITION))
   {
-    WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, CallerSavedRegistersInUse());
+    if (IsDebuggingEnabled())
+    {
+      WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, RSCRATCH, RSCRATCH2,
+                             CallerSavedRegistersInUse());
+    }
     if (inst.LK && !js.op->skipLRStack)
     {
       // We have to fake the stack as the RET instruction was not
@@ -199,8 +238,12 @@ void Jit64::bcx(UGeckoInstruction inst)
     gpr.Flush();
     fpr.Flush();
 
-    WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, {});
-    if (js.op->branchAction == PPCAnalyst::BranchAction::IdleLoop)
+    if (IsDebuggingEnabled())
+    {
+      // ABI_PARAM1 is safe to use after a GPR flush for an optimization in this function.
+      WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, ABI_PARAM1, RSCRATCH, {});
+    }
+    if (js.op->branchIsIdleLoop)
     {
       WriteIdleExit(js.op->branchTo);
     }
@@ -219,10 +262,18 @@ void Jit64::bcx(UGeckoInstruction inst)
   {
     gpr.Flush();
     fpr.Flush();
-    WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, {});
+    if (IsDebuggingEnabled())
+    {
+      // ABI_PARAM1 is safe to use after a GPR flush for an optimization in this function.
+      WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, ABI_PARAM1, RSCRATCH, {});
+    }
     WriteExit(js.compilerPC + 4);
   }
-  WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, CallerSavedRegistersInUse());
+  else if (IsDebuggingEnabled())
+  {
+    WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, RSCRATCH, RSCRATCH2,
+                            CallerSavedRegistersInUse());
+  }
 }
 
 void Jit64::bcctrx(UGeckoInstruction inst)
@@ -246,7 +297,12 @@ void Jit64::bcctrx(UGeckoInstruction inst)
     if (inst.LK_3)
       MOV(32, PPCSTATE_LR, Imm32(js.compilerPC + 4));  // LR = PC + 4;
     AND(32, R(RSCRATCH), Imm32(0xFFFFFFFC));
-    WriteBranchWatchDestInRSCRATCH(js.compilerPC, inst, BitSet32{RSCRATCH});
+    if (IsDebuggingEnabled())
+    {
+      // ABI_PARAM1 is safe to use after a GPR flush for an optimization in this function.
+      WriteBranchWatchDestInRSCRATCH(js.compilerPC, inst, ABI_PARAM1, RSCRATCH2,
+                                     BitSet32{RSCRATCH});
+    }
     WriteExitDestInRSCRATCH(inst.LK_3, js.compilerPC + 4);
   }
   else
@@ -269,7 +325,12 @@ void Jit64::bcctrx(UGeckoInstruction inst)
       RCForkGuard fpr_guard = fpr.Fork();
       gpr.Flush();
       fpr.Flush();
-      WriteBranchWatchDestInRSCRATCH(js.compilerPC, inst, BitSet32{RSCRATCH});
+      if (IsDebuggingEnabled())
+      {
+        // ABI_PARAM1 is safe to use after a GPR flush for an optimization in this function.
+        WriteBranchWatchDestInRSCRATCH(js.compilerPC, inst, ABI_PARAM1, RSCRATCH2,
+                                       BitSet32{RSCRATCH});
+      }
       WriteExitDestInRSCRATCH(inst.LK_3, js.compilerPC + 4);
       // Would really like to continue the block here, but it ends. TODO.
     }
@@ -279,10 +340,18 @@ void Jit64::bcctrx(UGeckoInstruction inst)
     {
       gpr.Flush();
       fpr.Flush();
-      WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, {});
+      if (IsDebuggingEnabled())
+      {
+        // ABI_PARAM1 is safe to use after a GPR flush for an optimization in this function.
+        WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, ABI_PARAM1, RSCRATCH, {});
+      }
       WriteExit(js.compilerPC + 4);
     }
-    WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, CallerSavedRegistersInUse());
+    else if (IsDebuggingEnabled())
+    {
+      WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, RSCRATCH, RSCRATCH2,
+                              CallerSavedRegistersInUse());
+    }
   }
 }
 
@@ -329,14 +398,23 @@ void Jit64::bclrx(UGeckoInstruction inst)
     gpr.Flush();
     fpr.Flush();
 
-    if (js.op->branchAction == PPCAnalyst::BranchAction::IdleLoop)
+    if (js.op->branchIsIdleLoop)
     {
-      WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, {});
+      if (IsDebuggingEnabled())
+      {
+        // ABI_PARAM1 is safe to use after a GPR flush for an optimization in this function.
+        WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, ABI_PARAM1, RSCRATCH, {});
+      }
       WriteIdleExit(js.op->branchTo);
     }
     else
     {
-      WriteBranchWatchDestInRSCRATCH(js.compilerPC, inst, BitSet32{RSCRATCH});
+      if (IsDebuggingEnabled())
+      {
+        // ABI_PARAM1 is safe to use after a GPR flush for an optimization in this function.
+        WriteBranchWatchDestInRSCRATCH(js.compilerPC, inst, ABI_PARAM1, RSCRATCH2,
+                                       BitSet32{RSCRATCH});
+      }
       WriteBLRExit();
     }
   }
@@ -350,11 +428,16 @@ void Jit64::bclrx(UGeckoInstruction inst)
   {
     gpr.Flush();
     fpr.Flush();
-    WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, {});
+    if (IsDebuggingEnabled())
+    {
+      // ABI_PARAM1 is safe to use after a GPR flush for an optimization in this function.
+      WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, ABI_PARAM1, RSCRATCH, {});
+    }
     WriteExit(js.compilerPC + 4);
   }
-  else
+  else if (IsDebuggingEnabled())
   {
-    WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, CallerSavedRegistersInUse());
+    WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, RSCRATCH, RSCRATCH2,
+                            CallerSavedRegistersInUse());
   }
 }

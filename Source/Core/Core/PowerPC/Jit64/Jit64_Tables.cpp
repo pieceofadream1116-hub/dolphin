@@ -101,7 +101,7 @@ constexpr std::array<Jit64OpTemplate, 13> s_table4{{
     {592, &Jit64::ps_mergeXX},  // ps_merge10
     {624, &Jit64::ps_mergeXX},  // ps_merge11
 
-    {1014, &Jit64::dcbz},  // dcbz_l
+    {1014, &Jit64::FallBackToInterpreter},  // dcbz_l
 }};
 
 constexpr std::array<Jit64OpTemplate, 17> s_table4_2{{
@@ -199,11 +199,11 @@ constexpr std::array<Jit64OpTemplate, 107> s_table31{{
     {824, &Jit64::srawix},  // srawix
     {24, &Jit64::slwx},     // slwx
 
-    {54, &Jit64::DoNothing},   // dcbst
+    {54, &Jit64::dcbx},        // dcbst
     {86, &Jit64::dcbx},        // dcbf
-    {246, &Jit64::DoNothing},  // dcbtst
-    {278, &Jit64::DoNothing},  // dcbt
-    {470, &Jit64::DoNothing},  // dcbi
+    {246, &Jit64::dcbt},       // dcbtst
+    {278, &Jit64::dcbt},       // dcbt
+    {470, &Jit64::dcbx},       // dcbi
     {758, &Jit64::DoNothing},  // dcba
     {1014, &Jit64::dcbz},      // dcbz
 

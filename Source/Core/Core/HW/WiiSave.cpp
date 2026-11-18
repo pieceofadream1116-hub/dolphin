@@ -12,6 +12,7 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <mbedtls/md5.h>
 #include <memory>
 #include <optional>
 #include <string>
@@ -21,16 +22,15 @@
 #include <fmt/format.h>
 
 #include "Common/Align.h"
-#include "Common/BitUtils.h"
 #include "Common/CommonTypes.h"
 #include "Common/Crypto/SHA1.h"
 #include "Common/Crypto/ec.h"
 #include "Common/FileUtil.h"
-#include "Common/Hash.h"
 #include "Common/IOFile.h"
 #include "Common/Lazy.h"
 #include "Common/Logging/Log.h"
 #include "Common/NandPaths.h"
+#include "Common/StringUtil.h"
 #include "Common/Swap.h"
 #include "Core/CommonTitles.h"
 #include "Core/HW/WiiSaveStructs.h"
@@ -85,7 +85,7 @@ public:
     for (const SaveFile& file : m_files_list)
     {
       // files in subdirs are deleted automatically when the subdir is deleted
-      if (file.path.contains('/'))
+      if (file.path.find('/') != std::string::npos)
         continue;
 
       const auto result =
@@ -126,8 +126,8 @@ public:
     header.banner[7] &= ~1;
 
     Md5 md5_calc;
-    Common::ComputeMD5(Common::AsU8Span(header), md5_calc.data());
-    header.md5 = md5_calc;
+    mbedtls_md5_ret(reinterpret_cast<const u8*>(&header), sizeof(Header), md5_calc.data());
+    header.md5 = std::move(md5_calc);
     return header;
   }
 
@@ -159,7 +159,7 @@ public:
 
   bool WriteBkHeader(const BkHeader& bk_header) override { return true; }
 
-  bool WriteFiles(std::span<const SaveFile> files) override
+  bool WriteFiles(const std::vector<SaveFile>& files) override
   {
     if (!m_uid || !m_gid)
       return false;
@@ -303,7 +303,7 @@ public:
     Md5 md5_file = header.md5;
     header.md5 = s_md5_blanker;
     Md5 md5_calc;
-    Common::ComputeMD5(Common::AsU8Span(header), md5_calc.data());
+    mbedtls_md5_ret(reinterpret_cast<const u8*>(&header), sizeof(Header), md5_calc.data());
     if (md5_file != md5_calc)
     {
       ERROR_LOG_FMT(CONSOLE, "MD5 mismatch\n {:016x}{:016x} != {:016x}{:016x}",
@@ -391,7 +391,7 @@ public:
     return m_file.Seek(sizeof(Header), File::SeekOrigin::Begin) && m_file.WriteArray(&bk_header, 1);
   }
 
-  bool WriteFiles(std::span<const SaveFile> files) override
+  bool WriteFiles(const std::vector<SaveFile>& files) override
   {
     if (!m_file.Seek(sizeof(Header) + sizeof(BkHeader), File::SeekOrigin::Begin))
       return false;
@@ -542,7 +542,7 @@ CopyResult Copy(Storage* source, Storage* dest)
   return CopyResult::Success;
 }
 
-CopyResult Import(const std::string& data_bin_path, const std::function<bool()>& can_overwrite)
+CopyResult Import(const std::string& data_bin_path, std::function<bool()> can_overwrite)
 {
   IOS::HLE::Kernel ios;
   const auto data_bin = MakeDataBinStorage(&ios.GetIOSC(), data_bin_path, "rb");

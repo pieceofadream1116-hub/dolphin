@@ -8,7 +8,9 @@
 #include "Common/Common.h"
 #include "Common/MathUtil.h"
 
+#include "InputCommon/ControlReference/ControlReference.h"
 #include "InputCommon/ControllerEmu/Control/Control.h"
+#include "InputCommon/ControllerEmu/Control/Input.h"
 #include "InputCommon/ControllerEmu/Setting/NumericSetting.h"
 
 namespace ControllerEmu
@@ -69,7 +71,7 @@ ControlState Tilt::GetDefaultInputRadiusAtAngle(double ang) const
 
 ControlState Tilt::GetMaxRotationalVelocity() const
 {
-  return m_max_rotational_velocity.GetValue() * MathUtil::TAU_v<ControlState>;
+  return m_max_rotational_velocity.GetValue() * MathUtil::TAU;
 }
 
 Control* Tilt::GetModifierInput() const

@@ -17,7 +17,6 @@
 #include <QSize>
 #include <QStyle>
 #include <QStyleHints>
-#include <QThread>
 #include <QWidget>
 
 #include "AudioCommon/AudioCommon.h"
@@ -25,6 +24,7 @@
 #include "Common/Config/Config.h"
 #include "Common/Contains.h"
 #include "Common/FileUtil.h"
+#include "Common/StringUtil.h"
 
 #include "Core/AchievementManager.h"
 #include "Core/Config/GraphicsSettings.h"
@@ -36,9 +36,11 @@
 #include "Core/NetPlayServer.h"
 #include "Core/System.h"
 
+#include "DolphinQt/Host.h"
 #include "DolphinQt/QtUtils/QueueOnObject.h"
 
 #include "InputCommon/ControllerInterface/ControllerInterface.h"
+#include "InputCommon/InputConfig.h"
 
 #include "VideoCommon/NetPlayChatUI.h"
 #include "VideoCommon/NetPlayGolfUI.h"
@@ -48,7 +50,7 @@ static std::unique_ptr<QPalette> s_default_palette;
 Settings::Settings()
 {
   qRegisterMetaType<Core::State>();
-  m_core_state_changed_hook = Core::AddOnStateChangedCallback([this](Core::State new_state) {
+  Core::AddOnStateChangedCallback([this](Core::State new_state) {
     QueueOnObject(this, [this, new_state] {
       // Avoid signal spam while continuously frame stepping. Will still send a signal for the first
       // and last framestep.
@@ -73,8 +75,8 @@ Settings::Settings()
     }
   });
 
-  m_hotplug_event_hook = g_controller_interface.RegisterDevicesChangedCallback([this] {
-    if (qApp->thread() == QThread::currentThread())
+  m_hotplug_callback_handle = g_controller_interface.RegisterDevicesChangedCallback([this] {
+    if (Core::IsHostThread())
     {
       emit DevicesChanged();
     }
@@ -90,13 +92,6 @@ Settings::Settings()
       QueueOnObject(this, [this] { emit DevicesChanged(); });
     }
   });
-
-  connect(this, &Settings::HardcoreModeChanged, this, [this](bool hardcore) {
-    if (hardcore)
-      emit DebugModeToggled(false);
-    else if (Config::IsDebuggingEnabled())
-      emit DebugModeToggled(true);
-  });
 }
 
 Settings::~Settings()
@@ -106,7 +101,7 @@ Settings::~Settings()
 
 void Settings::UnregisterDevicesChangedCallback()
 {
-  m_hotplug_event_hook.reset();
+  g_controller_interface.UnregisterDevicesChangedCallback(m_hotplug_callback_handle);
 }
 
 Settings& Settings::Instance()
@@ -165,15 +160,6 @@ bool Settings::IsThemeDark()
 void Settings::ApplyStyle()
 {
   const StyleType style_type = GetStyleType();
-
-  const bool use_fusion{style_type == StyleType::FusionLight ||
-                        style_type == StyleType::FusionDarkGray ||
-                        style_type == StyleType::FusionDark};
-  static const QString s_initial_style_name{QApplication::style()->name()};
-  const QString style_name{use_fusion ? QStringLiteral("fusion") : s_initial_style_name};
-  if (QApplication::style()->name() != style_name)
-    QApplication::setStyle(style_name);
-
   const QString stylesheet_name = GetUserStyleName();
   QString stylesheet_contents;
 
@@ -188,155 +174,12 @@ void Settings::ApplyStyle()
       stylesheet_contents = QString::fromUtf8(stylesheet.readAll().data());
   }
 
-  QPalette palette;
-
-  if (style_type == StyleType::FusionLight)
-  {
-    palette.setColor(QPalette::All, QPalette::Window, QColor(239, 239, 239));
-    palette.setColor(QPalette::Disabled, QPalette::Window, QColor(239, 239, 239));
-    palette.setColor(QPalette::All, QPalette::WindowText, QColor(0, 0, 0));
-    palette.setColor(QPalette::Disabled, QPalette::WindowText, QColor(190, 190, 190));
-    palette.setColor(QPalette::All, QPalette::Base, QColor(255, 255, 255));
-    palette.setColor(QPalette::Disabled, QPalette::Base, QColor(239, 239, 239));
-    palette.setColor(QPalette::All, QPalette::AlternateBase, QColor(247, 247, 247));
-    palette.setColor(QPalette::Disabled, QPalette::AlternateBase, QColor(247, 247, 247));
-    palette.setColor(QPalette::All, QPalette::ToolTipBase, QColor(255, 255, 220));
-    palette.setColor(QPalette::Disabled, QPalette::ToolTipBase, QColor(255, 255, 220));
-    palette.setColor(QPalette::All, QPalette::ToolTipText, QColor(0, 0, 0));
-    palette.setColor(QPalette::Disabled, QPalette::ToolTipText, QColor(0, 0, 0));
-    palette.setColor(QPalette::All, QPalette::PlaceholderText, QColor(119, 119, 119));
-    palette.setColor(QPalette::Disabled, QPalette::PlaceholderText, QColor(119, 119, 119));
-    palette.setColor(QPalette::All, QPalette::Text, QColor(0, 0, 0));
-    palette.setColor(QPalette::Disabled, QPalette::Text, QColor(190, 190, 190));
-    palette.setColor(QPalette::All, QPalette::Button, QColor(239, 239, 239));
-    palette.setColor(QPalette::Disabled, QPalette::Button, QColor(239, 239, 239));
-    palette.setColor(QPalette::All, QPalette::ButtonText, QColor(0, 0, 0));
-    palette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(190, 190, 190));
-    palette.setColor(QPalette::All, QPalette::BrightText, QColor(255, 255, 255));
-    palette.setColor(QPalette::Disabled, QPalette::BrightText, QColor(255, 255, 255));
-    palette.setColor(QPalette::All, QPalette::Light, QColor(255, 255, 255));
-    palette.setColor(QPalette::Disabled, QPalette::Light, QColor(255, 255, 255));
-    palette.setColor(QPalette::All, QPalette::Midlight, QColor(202, 202, 202));
-    palette.setColor(QPalette::Disabled, QPalette::Midlight, QColor(202, 202, 202));
-    palette.setColor(QPalette::All, QPalette::Dark, QColor(159, 159, 159));
-    palette.setColor(QPalette::Disabled, QPalette::Dark, QColor(190, 190, 190));
-    palette.setColor(QPalette::All, QPalette::Mid, QColor(184, 184, 184));
-    palette.setColor(QPalette::Disabled, QPalette::Mid, QColor(184, 184, 184));
-    palette.setColor(QPalette::All, QPalette::Shadow, QColor(118, 118, 118));
-    palette.setColor(QPalette::Disabled, QPalette::Shadow, QColor(177, 177, 177));
-    palette.setColor(QPalette::All, QPalette::Highlight, QColor(48, 140, 198));
-    palette.setColor(QPalette::Disabled, QPalette::Highlight, QColor(145, 145, 145));
-#if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
-    palette.setColor(QPalette::All, QPalette::Accent, QColor(48, 140, 198));
-    palette.setColor(QPalette::Disabled, QPalette::Accent, QColor(145, 145, 145).darker());
-#endif
-    palette.setColor(QPalette::All, QPalette::HighlightedText, QColor(255, 255, 255));
-    palette.setColor(QPalette::Disabled, QPalette::HighlightedText, QColor(255, 255, 255));
-    palette.setColor(QPalette::All, QPalette::Link, QColor(0, 0, 255));
-    palette.setColor(QPalette::Disabled, QPalette::Link, QColor(0, 0, 255));
-    palette.setColor(QPalette::All, QPalette::LinkVisited, QColor(255, 0, 255));
-    palette.setColor(QPalette::Disabled, QPalette::LinkVisited, QColor(255, 0, 255));
-  }
-  else if (style_type == StyleType::FusionDarkGray)
-  {
-    palette.setColor(QPalette::All, QPalette::Window, QColor(50, 50, 50));
-    palette.setColor(QPalette::Disabled, QPalette::Window, QColor(55, 55, 55));
-    palette.setColor(QPalette::All, QPalette::WindowText, QColor(200, 200, 200));
-    palette.setColor(QPalette::Disabled, QPalette::WindowText, QColor(108, 108, 108));
-    palette.setColor(QPalette::All, QPalette::Base, QColor(25, 25, 25));
-    palette.setColor(QPalette::Disabled, QPalette::Base, QColor(30, 30, 30));
-    palette.setColor(QPalette::All, QPalette::AlternateBase, QColor(38, 38, 38));
-    palette.setColor(QPalette::Disabled, QPalette::AlternateBase, QColor(42, 42, 42));
-    palette.setColor(QPalette::All, QPalette::ToolTipBase, QColor(45, 45, 45));
-    palette.setColor(QPalette::Disabled, QPalette::ToolTipBase, QColor(45, 45, 45));
-    palette.setColor(QPalette::All, QPalette::ToolTipText, QColor(200, 200, 200));
-    palette.setColor(QPalette::Disabled, QPalette::ToolTipText, QColor(200, 200, 200));
-    palette.setColor(QPalette::All, QPalette::PlaceholderText, QColor(90, 90, 90));
-    palette.setColor(QPalette::Disabled, QPalette::PlaceholderText, QColor(90, 90, 90));
-    palette.setColor(QPalette::All, QPalette::Text, QColor(200, 200, 200));
-    palette.setColor(QPalette::Disabled, QPalette::Text, QColor(108, 108, 108));
-    palette.setColor(QPalette::All, QPalette::Button, QColor(54, 54, 54));
-    palette.setColor(QPalette::Disabled, QPalette::Button, QColor(54, 54, 54));
-    palette.setColor(QPalette::All, QPalette::ButtonText, QColor(200, 200, 200));
-    palette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(108, 108, 108));
-    palette.setColor(QPalette::All, QPalette::BrightText, QColor(75, 75, 75));
-    palette.setColor(QPalette::Disabled, QPalette::BrightText, QColor(255, 255, 255));
-    palette.setColor(QPalette::All, QPalette::Light, QColor(26, 26, 26));
-    palette.setColor(QPalette::Disabled, QPalette::Light, QColor(26, 26, 26));
-    palette.setColor(QPalette::All, QPalette::Midlight, QColor(40, 40, 40));
-    palette.setColor(QPalette::Disabled, QPalette::Midlight, QColor(40, 40, 40));
-    palette.setColor(QPalette::All, QPalette::Dark, QColor(108, 108, 108));
-    palette.setColor(QPalette::Disabled, QPalette::Dark, QColor(108, 108, 108));
-    palette.setColor(QPalette::All, QPalette::Mid, QColor(71, 71, 71));
-    palette.setColor(QPalette::Disabled, QPalette::Mid, QColor(71, 71, 71));
-    palette.setColor(QPalette::All, QPalette::Shadow, QColor(25, 25, 25));
-    palette.setColor(QPalette::Disabled, QPalette::Shadow, QColor(37, 37, 37));
-    palette.setColor(QPalette::All, QPalette::Highlight, QColor(45, 140, 225));
-    palette.setColor(QPalette::Disabled, QPalette::Highlight, QColor(45, 140, 225).darker());
-#if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
-    palette.setColor(QPalette::All, QPalette::Accent, QColor(45, 140, 225));
-    palette.setColor(QPalette::Disabled, QPalette::Accent, QColor(45, 140, 225).darker());
-#endif
-    palette.setColor(QPalette::All, QPalette::HighlightedText, QColor(255, 255, 255));
-    palette.setColor(QPalette::Disabled, QPalette::HighlightedText, QColor(40, 40, 40));
-    palette.setColor(QPalette::All, QPalette::Link, QColor(40, 130, 220));
-    palette.setColor(QPalette::Disabled, QPalette::Link, QColor(40, 130, 220).darker());
-    palette.setColor(QPalette::All, QPalette::LinkVisited, QColor(110, 70, 150));
-    palette.setColor(QPalette::Disabled, QPalette::LinkVisited, QColor(110, 70, 150).darker());
-  }
-  else if (style_type == StyleType::FusionDark)
-  {
-    palette.setColor(QPalette::All, QPalette::Window, QColor(22, 22, 22));
-    palette.setColor(QPalette::Disabled, QPalette::Window, QColor(30, 30, 30));
-    palette.setColor(QPalette::All, QPalette::WindowText, QColor(180, 180, 180));
-    palette.setColor(QPalette::Disabled, QPalette::WindowText, QColor(90, 90, 90));
-    palette.setColor(QPalette::All, QPalette::Base, QColor(35, 35, 35));
-    palette.setColor(QPalette::Disabled, QPalette::Base, QColor(30, 30, 30));
-    palette.setColor(QPalette::All, QPalette::AlternateBase, QColor(40, 40, 40));
-    palette.setColor(QPalette::Disabled, QPalette::AlternateBase, QColor(35, 35, 35));
-    palette.setColor(QPalette::All, QPalette::ToolTipBase, QColor(0, 0, 0));
-    palette.setColor(QPalette::Disabled, QPalette::ToolTipBase, QColor(0, 0, 0));
-    palette.setColor(QPalette::All, QPalette::ToolTipText, QColor(170, 170, 170));
-    palette.setColor(QPalette::Disabled, QPalette::ToolTipText, QColor(170, 170, 170));
-    palette.setColor(QPalette::All, QPalette::PlaceholderText, QColor(100, 100, 100));
-    palette.setColor(QPalette::Disabled, QPalette::PlaceholderText, QColor(100, 100, 100));
-    palette.setColor(QPalette::All, QPalette::Text, QColor(200, 200, 200));
-    palette.setColor(QPalette::Disabled, QPalette::Text, QColor(90, 90, 90));
-    palette.setColor(QPalette::All, QPalette::Button, QColor(30, 30, 30));
-    palette.setColor(QPalette::Disabled, QPalette::Button, QColor(20, 20, 20));
-    palette.setColor(QPalette::All, QPalette::ButtonText, QColor(180, 180, 180));
-    palette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(90, 90, 90));
-    palette.setColor(QPalette::All, QPalette::BrightText, QColor(75, 75, 75));
-    palette.setColor(QPalette::Disabled, QPalette::BrightText, QColor(255, 255, 255));
-    palette.setColor(QPalette::All, QPalette::Light, QColor(0, 0, 0));
-    palette.setColor(QPalette::Disabled, QPalette::Light, QColor(0, 0, 0));
-    palette.setColor(QPalette::All, QPalette::Midlight, QColor(40, 40, 40));
-    palette.setColor(QPalette::Disabled, QPalette::Midlight, QColor(40, 40, 40));
-    palette.setColor(QPalette::All, QPalette::Dark, QColor(90, 90, 90));
-    palette.setColor(QPalette::Disabled, QPalette::Dark, QColor(90, 90, 90));
-    palette.setColor(QPalette::All, QPalette::Mid, QColor(60, 60, 60));
-    palette.setColor(QPalette::Disabled, QPalette::Mid, QColor(60, 60, 60));
-    palette.setColor(QPalette::All, QPalette::Shadow, QColor(10, 10, 10));
-    palette.setColor(QPalette::Disabled, QPalette::Shadow, QColor(20, 20, 20));
-    palette.setColor(QPalette::All, QPalette::Highlight, QColor(35, 130, 200));
-    palette.setColor(QPalette::Disabled, QPalette::Highlight, QColor(35, 130, 200).darker());
-#if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
-    palette.setColor(QPalette::All, QPalette::Accent, QColor(35, 130, 200));
-    palette.setColor(QPalette::Disabled, QPalette::Accent, QColor(35, 130, 200).darker());
-#endif
-    palette.setColor(QPalette::All, QPalette::HighlightedText, QColor(240, 240, 240));
-    palette.setColor(QPalette::Disabled, QPalette::HighlightedText, QColor(35, 35, 35));
-    palette.setColor(QPalette::All, QPalette::Link, QColor(40, 130, 220));
-    palette.setColor(QPalette::Disabled, QPalette::Link, QColor(40, 130, 220).darker());
-    palette.setColor(QPalette::All, QPalette::LinkVisited, QColor(110, 70, 150));
-    palette.setColor(QPalette::Disabled, QPalette::LinkVisited, QColor(110, 70, 150).darker());
-  }
 #ifdef _WIN32
   // Unlike other OSes we don't automatically get a default dark theme on Windows.
   // We manually load a dark palette for our included "(Dark)" style,
   //  and for *any* external style when the system is in "Dark" mode.
   // Unfortunately it doesn't seem trivial to load a palette based on the stylesheet itself.
-  else if (style_type == StyleType::Dark || (style_type != StyleType::Light && IsSystemDark()))
+  if (style_type == StyleType::Dark || (style_type != StyleType::Light && IsSystemDark()))
   {
     if (stylesheet_contents.isEmpty())
     {
@@ -345,7 +188,7 @@ void Settings::ApplyStyle()
         stylesheet_contents = QString::fromUtf8(file.readAll().data());
     }
 
-    palette = qApp->style()->standardPalette();
+    QPalette palette = qApp->style()->standardPalette();
     palette.setColor(QPalette::Window, QColor(32, 32, 32));
     palette.setColor(QPalette::WindowText, QColor(220, 220, 220));
     palette.setColor(QPalette::Base, QColor(32, 32, 32));
@@ -359,19 +202,20 @@ void Settings::ApplyStyle()
     palette.setColor(QPalette::HighlightedText, QColor(255, 255, 255));
     palette.setColor(QPalette::Link, QColor(100, 160, 220));
     palette.setColor(QPalette::LinkVisited, QColor(100, 160, 220));
+    qApp->setPalette(palette);
   }
-#endif
   else
   {
+    // reset any palette changes that may exist from a previously set dark mode
     if (s_default_palette)
-      palette = *s_default_palette;
+      qApp->setPalette(*s_default_palette);
   }
-
-  qApp->setPalette(palette);
+#endif
 
   // Define tooltips style if not already defined
   if (!stylesheet_contents.contains(QStringLiteral("QToolTip"), Qt::CaseSensitive))
   {
+    const QPalette& palette = qApp->palette();
     QColor window_color;
     QColor text_color;
     QColor unused_text_emphasis_color;
@@ -379,39 +223,14 @@ void Settings::ApplyStyle()
     GetToolTipStyle(window_color, text_color, unused_text_emphasis_color, border_color, palette,
                     palette);
 
-    const int padding{QFontMetrics(QFont()).height() / 2};
-
     const auto tooltip_stylesheet =
-        QStringLiteral("QToolTip { background-color: #%1; color: #%2; padding: %3px; "
-                       "border: 1px; border-style: solid; border-color: #%4; }")
+        QStringLiteral("QToolTip { background-color: #%1; color: #%2; padding: 8px; "
+                       "border: 1px; border-style: solid; border-color: #%3; }")
             .arg(window_color.rgba(), 0, 16)
             .arg(text_color.rgba(), 0, 16)
-            .arg(padding)
             .arg(border_color.rgba(), 0, 16);
     stylesheet_contents.append(QStringLiteral("%1").arg(tooltip_stylesheet));
   }
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
-  // For Fusion, define group box style if not already defined.
-  if (style_name.compare(QStringLiteral("fusion"), Qt::CaseInsensitive) == 0 &&
-      !stylesheet_contents.contains(QStringLiteral("QGroupBox")))
-  {
-    stylesheet_contents.append(QStringLiteral("QGroupBox {"
-                                              " margin-top: 0.6em;"
-                                              " padding-top: 0.5em;"
-                                              " padding-bottom: 0;"
-                                              " padding-left: 1px;"
-                                              " padding-right: 1px;"
-                                              "} "
-                                              "QGroupBox::title {"
-                                              " subcontrol-origin: margin;"
-                                              " subcontrol-position: top left;"
-                                              " left: 0.7em;"
-                                              " padding-top: 1px;"
-                                              " min-width: 0;"
-                                              "}"));
-  }
-#endif
 
   qApp->setStyleSheet(stylesheet_contents);
 }
@@ -438,7 +257,7 @@ void Settings::SetStyleType(StyleType type)
 {
   GetQSettings().setValue(QStringLiteral("userstyle/styletype"), static_cast<int>(type));
 
-  // also set the old setting so that the config is correctly interpreted by older Dolphin builds
+  // also set the old setting so that the config is correctly intepreted by older Dolphin builds
   GetQSettings().setValue(QStringLiteral("userstyle/enabled"), type == StyleType::User);
 }
 
@@ -541,27 +360,12 @@ void Settings::SetAutoRefreshEnabled(bool enabled)
   emit AutoRefreshToggled(enabled);
 }
 
-bool Settings::IsGameCountVisible() const
-{
-  return GetQSettings().value(QStringLiteral("GameCount/Visible"), true).toBool();
-}
-
-void Settings::SetGameCountVisible(const bool visible)
-{
-  if (IsGameCountVisible() == visible)
-    return;
-
-  GetQSettings().setValue(QStringLiteral("GameCount/Visible"), visible);
-
-  emit GameCountVisibilityChanged(visible);
-}
-
 QString Settings::GetDefaultGame() const
 {
   return QString::fromStdString(Config::Get(Config::MAIN_DEFAULT_ISO));
 }
 
-void Settings::SetDefaultGame(const QString& path)
+void Settings::SetDefaultGame(QString path)
 {
   if (GetDefaultGame() != path)
   {
@@ -706,6 +510,22 @@ bool Settings::GetCheatsEnabled() const
   return Config::Get(Config::MAIN_ENABLE_CHEATS);
 }
 
+void Settings::SetDebugModeEnabled(bool enabled)
+{
+  if (AchievementManager::GetInstance().IsHardcoreModeActive())
+    enabled = false;
+  if (IsDebugModeEnabled() != enabled)
+  {
+    Config::SetBaseOrCurrent(Config::MAIN_ENABLE_DEBUGGING, enabled);
+    emit DebugModeToggled(enabled);
+  }
+}
+
+bool Settings::IsDebugModeEnabled() const
+{
+  return Config::Get(Config::MAIN_ENABLE_DEBUGGING);
+}
+
 void Settings::SetRegistersVisible(bool enabled)
 {
   if (IsRegistersVisible() != enabled)
@@ -838,13 +658,12 @@ bool Settings::IsAssemblerVisible() const
 
 void Settings::RefreshWidgetVisibility()
 {
-  emit DebugModeToggled(Config::IsDebuggingEnabled());
+  emit DebugModeToggled(IsDebugModeEnabled());
   emit LogVisibilityChanged(IsLogVisible());
   emit LogConfigVisibilityChanged(IsLogConfigVisible());
-  emit GameCountVisibilityChanged(IsGameCountVisible());
 }
 
-void Settings::SetDebugFont(const QFont& font)
+void Settings::SetDebugFont(QFont font)
 {
   if (GetDebugFont() != font)
   {
@@ -862,20 +681,6 @@ QFont Settings::GetDebugFont() const
   return GetQSettings().value(QStringLiteral("debugger/font"), default_font).value<QFont>();
 }
 
-void Settings::SetShowDemangledNames(bool enabled)
-{
-  if (IsShowDemangledNames() == enabled)
-    return;
-  QSettings().setValue(QStringLiteral("debugger/showdemanglednames"), enabled);
-
-  emit ShowDemangledNamesChanged(enabled);
-}
-
-bool Settings::IsShowDemangledNames() const
-{
-  return QSettings().value(QStringLiteral("debugger/showdemanglednames")).toBool();
-}
-
 void Settings::SetAutoUpdateTrack(const QString& mode)
 {
   if (mode == GetAutoUpdateTrack())
@@ -889,6 +694,21 @@ void Settings::SetAutoUpdateTrack(const QString& mode)
 QString Settings::GetAutoUpdateTrack() const
 {
   return QString::fromStdString(Config::Get(Config::MAIN_AUTOUPDATE_UPDATE_TRACK));
+}
+
+void Settings::SetFallbackRegion(const DiscIO::Region& region)
+{
+  if (region == GetFallbackRegion())
+    return;
+
+  Config::SetBase(Config::MAIN_FALLBACK_REGION, region);
+
+  emit FallbackRegionChanged(region);
+}
+
+DiscIO::Region Settings::GetFallbackRegion() const
+{
+  return Config::Get(Config::MAIN_FALLBACK_REGION);
 }
 
 void Settings::SetAnalyticsEnabled(bool enabled)
@@ -953,7 +773,10 @@ bool Settings::IsSDCardInserted() const
 void Settings::SetSDCardInserted(bool inserted)
 {
   if (IsSDCardInserted() != inserted)
+  {
     Config::SetBaseOrCurrent(Config::MAIN_WII_SD_CARD, inserted);
+    emit SDCardInsertionChanged(inserted);
+  }
 }
 
 bool Settings::IsUSBKeyboardConnected() const
@@ -964,7 +787,10 @@ bool Settings::IsUSBKeyboardConnected() const
 void Settings::SetUSBKeyboardConnected(bool connected)
 {
   if (IsUSBKeyboardConnected() != connected)
+  {
     Config::SetBaseOrCurrent(Config::MAIN_WII_KEYBOARD, connected);
+    emit USBKeyboardConnectionChanged(connected);
+  }
 }
 
 bool Settings::IsWiiSpeakMuted() const

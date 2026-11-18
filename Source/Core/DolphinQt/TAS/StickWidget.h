@@ -13,8 +13,6 @@ class StickWidget : public QWidget
 public:
   explicit StickWidget(QWidget* parent, u16 width, u16 height);
 
-  QSize sizeHint() const override;
-
 signals:
   void ChangedX(u16 x);
   void ChangedY(u16 y);

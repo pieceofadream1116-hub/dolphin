@@ -4,7 +4,7 @@
 #include "Common/Thread.h"
 
 #ifdef _WIN32
-#include <windows.h>
+#include <Windows.h>
 #include <processthreadsapi.h>
 #else
 #include <pthread.h>
@@ -26,10 +26,9 @@
 #pragma comment(lib, "libittnotify.lib")
 #endif
 
+#include "Common/CommonFuncs.h"
 #include "Common/CommonTypes.h"
-#ifdef _WIN32
 #include "Common/StringUtil.h"
-#endif
 
 namespace Common
 {
@@ -60,6 +59,11 @@ void SetCurrentThreadAffinity(u32 mask)
 void SleepCurrentThread(int ms)
 {
   Sleep(ms);
+}
+
+void SwitchCurrentThread()
+{
+  SwitchToThread();
 }
 
 // Sets the debugger-visible name of the current thread.
@@ -154,6 +158,11 @@ void SetCurrentThreadAffinity(u32 mask)
 void SleepCurrentThread(int ms)
 {
   usleep(1000 * ms);
+}
+
+void SwitchCurrentThread()
+{
+  usleep(1000 * 1);
 }
 
 void SetCurrentThreadName(const char* name)

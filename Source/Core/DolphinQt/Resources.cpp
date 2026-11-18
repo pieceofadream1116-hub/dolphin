@@ -8,10 +8,12 @@
 #include <QImageReader>
 #include <QPixmap>
 
+#include "Common/Assert.h"
 #include "Common/FileUtil.h"
-#include "Common/Logging/Log.h"
 
 #include "Core/Config/MainSettings.h"
+
+#include "DolphinQt/Settings.h"
 
 bool Resources::m_svg_supported;
 QList<QIcon> Resources::m_platforms;
@@ -48,10 +50,7 @@ QIcon Resources::LoadNamedIcon(std::string_view name, const QString& dir)
   for (auto scale : {1, 2, 4})
     load_png(scale);
 
-  if (icon.isNull())
-  {
-    ERROR_LOG_FMT(COMMON, "LoadNamedIcon: \"{}\" could not be loaded.", name);
-  }
+  ASSERT(icon.availableSizes().size() > 0);
 
   return icon;
 }

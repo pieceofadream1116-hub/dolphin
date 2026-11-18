@@ -3,6 +3,8 @@
 
 #include "DolphinQt/Settings/GeneralPane.h"
 
+#include <map>
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QFormLayout>
@@ -16,12 +18,13 @@
 #include "Core/AchievementManager.h"
 #include "Core/Config/MainSettings.h"
 #include "Core/Config/UISettings.h"
+#include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/DolphinAnalytics.h"
+#include "Core/PowerPC/PowerPC.h"
 #include "Core/System.h"
 
 #include "DolphinQt/Config/ConfigControls/ConfigBool.h"
-#include "DolphinQt/Config/ConfigControls/ConfigChoice.h"
 #include "DolphinQt/Config/ToolTipControls/ToolTipCheckBox.h"
 #include "DolphinQt/Config/ToolTipControls/ToolTipComboBox.h"
 #include "DolphinQt/Config/ToolTipControls/ToolTipPushButton.h"
@@ -35,15 +38,17 @@
 #endif
 
 constexpr int AUTO_UPDATE_DISABLE_INDEX = 0;
-constexpr int AUTO_UPDATE_RELEASE_INDEX = 1;
+constexpr int AUTO_UPDATE_BETA_INDEX = 1;
 constexpr int AUTO_UPDATE_DEV_INDEX = 2;
 
 constexpr const char* AUTO_UPDATE_DISABLE_STRING = "";
-// Before the official switch to the rolling release cycle in 2407, de facto releases were called
-// beta builds. To maintain backward compatibility and let users update from those builds to current
-// releases the value of this string remains "beta".
-constexpr const char* AUTO_UPDATE_RELEASE_STRING = "beta";
+constexpr const char* AUTO_UPDATE_BETA_STRING = "beta";
 constexpr const char* AUTO_UPDATE_DEV_STRING = "dev";
+
+constexpr int FALLBACK_REGION_NTSCJ_INDEX = 0;
+constexpr int FALLBACK_REGION_NTSCU_INDEX = 1;
+constexpr int FALLBACK_REGION_PAL_INDEX = 2;
+constexpr int FALLBACK_REGION_NTSCK_INDEX = 3;
 
 GeneralPane::GeneralPane(QWidget* parent) : QWidget(parent)
 {
@@ -85,14 +90,11 @@ void GeneralPane::OnEmulationStateChanged(Core::State state)
 
   m_checkbox_dualcore->setEnabled(!running);
   m_checkbox_cheats->setEnabled(!running);
-  m_checkbox_load_games_into_memory->setEnabled(!running);
   m_checkbox_override_region_settings->setEnabled(!running);
 #ifdef USE_DISCORD_PRESENCE
   m_checkbox_discord_presence->setEnabled(!running);
 #endif
   m_combobox_fallback_region->setEnabled(!running);
-
-  UpdateDescriptionsUsingHardcoreStatus();
 }
 
 void GeneralPane::ConnectLayout()
@@ -100,7 +102,7 @@ void GeneralPane::ConnectLayout()
   connect(m_checkbox_cheats, &QCheckBox::toggled, &Settings::Instance(),
           &Settings::EnableCheatsChanged);
 #ifdef USE_DISCORD_PRESENCE
-  connect(m_checkbox_discord_presence, &QCheckBox::toggled, this, &Discord::SetDiscordPresence);
+  connect(m_checkbox_discord_presence, &QCheckBox::toggled, this, &GeneralPane::OnSaveConfig);
 #endif
 
   if (AutoUpdateChecker::SystemSupportsAutoUpdates())
@@ -111,8 +113,16 @@ void GeneralPane::ConnectLayout()
             &GeneralPane::LoadConfig);
   }
 
+  // Advanced
+  connect(m_combobox_speedlimit, &QComboBox::currentIndexChanged, [this] {
+    Config::SetBaseOrCurrent(Config::MAIN_EMULATION_SPEED,
+                             m_combobox_speedlimit->currentIndex() * 0.1f);
+    Config::Save();
+  });
+
   connect(m_combobox_fallback_region, &QComboBox::currentIndexChanged, this,
           &GeneralPane::OnSaveConfig);
+  connect(&Settings::Instance(), &Settings::FallbackRegionChanged, this, &GeneralPane::LoadConfig);
 
 #if defined(USE_ANALYTICS) && USE_ANALYTICS
   connect(&Settings::Instance(), &Settings::AnalyticsToggled, this, &GeneralPane::LoadConfig);
@@ -135,15 +145,6 @@ void GeneralPane::CreateBasic()
   m_checkbox_cheats = new ConfigBool(tr("Enable Cheats"), Config::MAIN_ENABLE_CHEATS);
   basic_group_layout->addWidget(m_checkbox_cheats);
 
-  m_checkbox_load_games_into_memory =
-      new ConfigBool(tr("Load Whole Game Into Memory"), Config::MAIN_LOAD_GAME_INTO_MEMORY);
-  basic_group_layout->addWidget(m_checkbox_load_games_into_memory);
-  m_checkbox_load_games_into_memory->SetDescription(
-      tr("Loads the running game into memory in the background."
-         "<br><br>This may improve performance with slow or high-latency storage."
-         "<br>System memory requirements will be much higher with this setting enabled."
-         "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>"));
-
   m_checkbox_override_region_settings =
       new ConfigBool(tr("Allow Mismatched Region Settings"), Config::MAIN_OVERRIDE_REGION_SETTINGS);
   basic_group_layout->addWidget(m_checkbox_override_region_settings);
@@ -153,8 +154,7 @@ void GeneralPane::CreateBasic()
   basic_group_layout->addWidget(m_checkbox_auto_disc_change);
 
 #ifdef USE_DISCORD_PRESENCE
-  m_checkbox_discord_presence =
-      new ConfigBool(tr("Show Current Game on Discord"), Config::MAIN_USE_DISCORD_PRESENCE);
+  m_checkbox_discord_presence = new ToolTipCheckBox(tr("Show Current Game on Discord"));
   basic_group_layout->addWidget(m_checkbox_discord_presence);
 #endif
 
@@ -163,8 +163,9 @@ void GeneralPane::CreateBasic()
   speed_limit_layout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
   basic_group_layout->addLayout(speed_limit_layout);
 
-  std::vector<std::pair<QString, float>> speedlimit_choices{};
-  speedlimit_choices.emplace_back(tr("Unlimited"), 0.0f);
+  m_combobox_speedlimit = new ToolTipComboBox();
+
+  m_combobox_speedlimit->addItem(tr("Unlimited"));
   for (int i = 10; i <= 200; i += 10)  // from 10% to 200%
   {
     QString str;
@@ -173,12 +174,8 @@ void GeneralPane::CreateBasic()
     else
       str = tr("%1% (Normal Speed)").arg(i);
 
-    const float value = static_cast<float>(i) / 100.0f;
-    speedlimit_choices.emplace_back(str, value);
+    m_combobox_speedlimit->addItem(str);
   }
-
-  m_combobox_speedlimit =
-      new ConfigChoiceMap<float>(speedlimit_choices, Config::MAIN_EMULATION_SPEED);
 
   speed_limit_layout->addRow(tr("&Speed Limit:"), m_combobox_speedlimit);
 }
@@ -218,14 +215,11 @@ void GeneralPane::CreateFallbackRegion()
   fallback_region_dropdown_layout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
   fallback_region_group_layout->addLayout(fallback_region_dropdown_layout);
 
-  std::vector<std::pair<QString, DiscIO::Region>> fallback_choices{
-      {tr("NTSC-J"), DiscIO::Region::NTSC_J},
-      {tr("NTSC-U"), DiscIO::Region::NTSC_U},
-      {tr("PAL"), DiscIO::Region::PAL},
-      {tr("NTSC-K"), DiscIO::Region::NTSC_K},
-  };
-  m_combobox_fallback_region = new ConfigChoiceMap(fallback_choices, Config::MAIN_FALLBACK_REGION);
+  m_combobox_fallback_region = new ToolTipComboBox();
   fallback_region_dropdown_layout->addRow(tr("Fallback Region:"), m_combobox_fallback_region);
+
+  for (const QString& option : {tr("NTSC-J"), tr("NTSC-U"), tr("PAL"), tr("NTSC-K")})
+    m_combobox_fallback_region->addItem(option);
 }
 
 #if defined(USE_ANALYTICS) && USE_ANALYTICS
@@ -258,13 +252,33 @@ void GeneralPane::LoadConfig()
     else if (track == AUTO_UPDATE_DEV_STRING)
       SignalBlocking(m_combobox_update_track)->setCurrentIndex(AUTO_UPDATE_DEV_INDEX);
     else
-      SignalBlocking(m_combobox_update_track)->setCurrentIndex(AUTO_UPDATE_RELEASE_INDEX);
+      SignalBlocking(m_combobox_update_track)->setCurrentIndex(AUTO_UPDATE_BETA_INDEX);
   }
 
 #if defined(USE_ANALYTICS) && USE_ANALYTICS
   SignalBlocking(m_checkbox_enable_analytics)
       ->setChecked(Settings::Instance().IsAnalyticsEnabled());
 #endif
+
+#ifdef USE_DISCORD_PRESENCE
+  SignalBlocking(m_checkbox_discord_presence)
+      ->setChecked(Config::Get(Config::MAIN_USE_DISCORD_PRESENCE));
+#endif
+  int selection = qRound(Config::Get(Config::MAIN_EMULATION_SPEED) * 10);
+  if (selection < m_combobox_speedlimit->count())
+    SignalBlocking(m_combobox_speedlimit)->setCurrentIndex(selection);
+
+  const auto fallback = Settings::Instance().GetFallbackRegion();
+  if (fallback == DiscIO::Region::NTSC_J)
+    SignalBlocking(m_combobox_fallback_region)->setCurrentIndex(FALLBACK_REGION_NTSCJ_INDEX);
+  else if (fallback == DiscIO::Region::NTSC_U)
+    SignalBlocking(m_combobox_fallback_region)->setCurrentIndex(FALLBACK_REGION_NTSCU_INDEX);
+  else if (fallback == DiscIO::Region::PAL)
+    SignalBlocking(m_combobox_fallback_region)->setCurrentIndex(FALLBACK_REGION_PAL_INDEX);
+  else if (fallback == DiscIO::Region::NTSC_K)
+    SignalBlocking(m_combobox_fallback_region)->setCurrentIndex(FALLBACK_REGION_NTSCK_INDEX);
+  else
+    SignalBlocking(m_combobox_fallback_region)->setCurrentIndex(FALLBACK_REGION_NTSCJ_INDEX);
 }
 
 static QString UpdateTrackFromIndex(int index)
@@ -276,8 +290,8 @@ static QString UpdateTrackFromIndex(int index)
   case AUTO_UPDATE_DISABLE_INDEX:
     value = QString::fromStdString(AUTO_UPDATE_DISABLE_STRING);
     break;
-  case AUTO_UPDATE_RELEASE_INDEX:
-    value = QString::fromStdString(AUTO_UPDATE_RELEASE_STRING);
+  case AUTO_UPDATE_BETA_INDEX:
+    value = QString::fromStdString(AUTO_UPDATE_BETA_STRING);
     break;
   case AUTO_UPDATE_DEV_INDEX:
     value = QString::fromStdString(AUTO_UPDATE_DEV_STRING);
@@ -287,20 +301,54 @@ static QString UpdateTrackFromIndex(int index)
   return value;
 }
 
+static DiscIO::Region UpdateFallbackRegionFromIndex(int index)
+{
+  DiscIO::Region value = DiscIO::Region::Unknown;
+
+  switch (index)
+  {
+  case FALLBACK_REGION_NTSCJ_INDEX:
+    value = DiscIO::Region::NTSC_J;
+    break;
+  case FALLBACK_REGION_NTSCU_INDEX:
+    value = DiscIO::Region::NTSC_U;
+    break;
+  case FALLBACK_REGION_PAL_INDEX:
+    value = DiscIO::Region::PAL;
+    break;
+  case FALLBACK_REGION_NTSCK_INDEX:
+    value = DiscIO::Region::NTSC_K;
+    break;
+  default:
+    value = DiscIO::Region::NTSC_J;
+  }
+
+  return value;
+}
+
 void GeneralPane::OnSaveConfig()
 {
   Config::ConfigChangeCallbackGuard config_guard;
 
+  auto& settings = SConfig::GetInstance();
   if (AutoUpdateChecker::SystemSupportsAutoUpdates())
   {
     Settings::Instance().SetAutoUpdateTrack(
         UpdateTrackFromIndex(m_combobox_update_track->currentIndex()));
   }
 
+#ifdef USE_DISCORD_PRESENCE
+  Discord::SetDiscordPresenceEnabled(m_checkbox_discord_presence->isChecked());
+#endif
+
 #if defined(USE_ANALYTICS) && USE_ANALYTICS
   Settings::Instance().SetAnalyticsEnabled(m_checkbox_enable_analytics->isChecked());
   DolphinAnalytics::Instance().ReloadConfig();
 #endif
+  Settings::Instance().SetFallbackRegion(
+      UpdateFallbackRegionFromIndex(m_combobox_fallback_region->currentIndex()));
+
+  settings.SaveSettings();
 }
 
 #if defined(USE_ANALYTICS) && USE_ANALYTICS
@@ -349,6 +397,12 @@ void GeneralPane::AddDescriptions()
                  "<br><br>This setting cannot be changed while emulation is active."
                  "<br><br><dolphin_emphasis>If unsure, leave this checked.</dolphin_emphasis>");
 #endif
+  static constexpr char TR_SPEEDLIMIT_DESCRIPTION[] =
+      QT_TR_NOOP("Controls how fast emulation runs relative to the original hardware."
+                 "<br><br>Values higher than 100% will emulate faster than the original hardware "
+                 "can run, if your hardware is able to keep up. Values lower than 100% will slow "
+                 "emulation instead. Unlimited will emulate as fast as your hardware is able to."
+                 "<br><br><dolphin_emphasis>If unsure, select 100%.</dolphin_emphasis>");
   static constexpr char TR_UPDATE_TRACK_DESCRIPTION[] = QT_TR_NOOP(
       "Selects which update track Dolphin uses when checking for updates at startup. If a new "
       "update is available, Dolphin will show a list of changes made since your current version "
@@ -396,6 +450,7 @@ void GeneralPane::AddDescriptions()
 #endif
 
   m_combobox_speedlimit->SetTitle(tr("Speed Limit"));
+  m_combobox_speedlimit->SetDescription(tr(TR_SPEEDLIMIT_DESCRIPTION));
 
   if (AutoUpdateChecker::SystemSupportsAutoUpdates())
   {
@@ -412,31 +467,4 @@ void GeneralPane::AddDescriptions()
   m_button_generate_new_identity->SetTitle(tr("Generate a New Statistics Identity"));
   m_button_generate_new_identity->SetDescription(tr(TR_GENERATE_NEW_IDENTITY_DESCRIPTION));
 #endif
-}
-
-void GeneralPane::UpdateDescriptionsUsingHardcoreStatus()
-{
-  const bool hardcore_enabled = AchievementManager::GetInstance().IsHardcoreModeActive();
-
-  static constexpr char TR_SPEEDLIMIT_DESCRIPTION[] =
-      QT_TR_NOOP("Controls how fast emulation runs relative to the original hardware."
-                 "<br><br>Values higher than 100% will emulate faster than the original hardware "
-                 "can run, if your hardware is able to keep up. Values lower than 100% will slow "
-                 "emulation instead. Unlimited will emulate as fast as your hardware is able to."
-                 "<br><br><dolphin_emphasis>If unsure, select 100%.</dolphin_emphasis>");
-  static constexpr char TR_SPEEDLIMIT_RESTRICTION_IN_HARDCORE_DESCRIPTION[] =
-      QT_TR_NOOP("<dolphin_emphasis>When Hardcore Mode is enabled, Speed Limit values less than "
-                 "100% will be treated as 100%.</dolphin_emphasis>");
-
-  if (hardcore_enabled)
-  {
-    m_combobox_speedlimit->SetDescription(
-        tr("%1<br><br>%2")
-            .arg(tr(TR_SPEEDLIMIT_DESCRIPTION))
-            .arg(tr(TR_SPEEDLIMIT_RESTRICTION_IN_HARDCORE_DESCRIPTION)));
-  }
-  else
-  {
-    m_combobox_speedlimit->SetDescription(tr(TR_SPEEDLIMIT_DESCRIPTION));
-  }
 }

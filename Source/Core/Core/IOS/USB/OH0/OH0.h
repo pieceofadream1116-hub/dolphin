@@ -9,6 +9,7 @@
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "Common/CommonTypes.h"
 #include "Core/IOS/Device.h"

@@ -5,8 +5,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
-#include <fstream>
 #include <memory>
 #include <numeric>
 #include <optional>
@@ -17,6 +17,7 @@
 
 #include <fmt/ranges.h>
 
+#include "Common/Align.h"
 #include "Common/CommonPaths.h"
 #include "Common/CommonTypes.h"
 #include "Common/Config/Config.h"
@@ -36,7 +37,6 @@
 #include "Core/ConfigManager.h"
 #include "Core/FifoPlayer/FifoPlayer.h"
 #include "Core/HLE/HLE.h"
-#include "Core/HW/DVD/AMMediaboard.h"
 #include "Core/HW/DVD/DVDInterface.h"
 #include "Core/HW/EXI/EXI_DeviceIPL.h"
 #include "Core/HW/Memmap.h"
@@ -75,11 +75,6 @@ static std::vector<std::string> ReadM3UFile(const std::string& m3u_path,
   {
     // This is the UTF-8 representation of U+FEFF.
     constexpr std::string_view utf8_bom = "\xEF\xBB\xBF";
-
-#ifndef _WIN32
-    if (line.ends_with('\r'))
-      line.pop_back();
-#endif
 
     if (line.starts_with(utf8_bom))
     {
@@ -245,7 +240,7 @@ std::unique_ptr<BootParameters> BootParameters::GenerateFromFile(std::vector<std
        ".elf"}};
   if (disc_image_extensions.contains(extension))
   {
-    std::unique_ptr<DiscIO::VolumeDisc> disc = DiscIO::CreateDiscForCore(path);
+    std::unique_ptr<DiscIO::VolumeDisc> disc = DiscIO::CreateDisc(path);
     if (disc)
     {
       return std::make_unique<BootParameters>(Disc{std::move(path), std::move(disc), paths},
@@ -275,7 +270,7 @@ std::unique_ptr<BootParameters> BootParameters::GenerateFromFile(std::vector<std
 
   if (extension == ".wad")
   {
-    std::unique_ptr<DiscIO::VolumeWAD> wad = DiscIO::CreateWAD(path);
+    std::unique_ptr<DiscIO::VolumeWAD> wad = DiscIO::CreateWAD(std::move(path));
     if (wad)
       return std::make_unique<BootParameters>(std::move(*wad), std::move(boot_session_data_));
   }
@@ -379,8 +374,7 @@ bool CBoot::Load_BS2(Core::System& system, const std::string& boot_rom_filename)
   constexpr u32 PAL_v1_0 = 0x4F319F43;
   // DOL-101(EUR) (PAL Revision 1.2)
   constexpr u32 PAL_v1_2 = 0xAD1B7F16;
-  // Triforce Arcade IPL (DEV Revision 1.0)
-  constexpr u32 Triforce = 0xD1883221;
+  constexpr u32 Triforce = 0xD1883221;  // The Triforce's special IPL
 
   // Load the IPL ROM dump, limited to 2MiB which is the size of the official IPLs.
   constexpr size_t max_ipl_size = 2 * 1024 * 1024;
@@ -414,7 +408,6 @@ bool CBoot::Load_BS2(Core::System& system, const std::string& boot_rom_filename)
     break;
   case Triforce:
     known_ipl = true;
-    break;
   default:
     PanicAlertFmtT("The IPL file is not a known good dump. (CRC32: {0:x})", ipl_hash);
     break;
@@ -465,17 +458,9 @@ bool CBoot::Load_BS2(Core::System& system, const std::string& boot_rom_filename)
   ppc_state.spr[SPR_DBAT3L] = 0xfff00001;
   SetupBAT(system, /*is_wii*/ false);
 
-  if (ipl_hash == Triforce)
-  {
-    HLE::Patch(system, 0x813048B8, "OSReport");
-    HLE::Patch(system, 0x8130095C, "OSReport");  // Apploader
-
-    AMMediaboard::FirmwareMap(true);
-  }
-
   ppc_state.pc = 0x81200150;
 
-  system.GetPowerPC().MSRUpdated();
+  PowerPC::MSRUpdated(ppc_state);
 
   return true;
 }
@@ -484,7 +469,7 @@ static void SetDefaultDisc(DVD::DVDInterface& dvd_interface)
 {
   const std::string default_iso = Config::Get(Config::MAIN_DEFAULT_ISO);
   if (!default_iso.empty())
-    SetDisc(dvd_interface, DiscIO::CreateDiscForCore(default_iso));
+    SetDisc(dvd_interface, DiscIO::CreateDisc(default_iso));
 }
 
 static void CopyDefaultExceptionHandlers(Core::System& system)
@@ -506,12 +491,6 @@ bool CBoot::BootUp(Core::System& system, const Core::CPUThreadGuard& guard,
 {
   SConfig& config = SConfig::GetInstance();
 
-  // Triforce systems are region free and always must use the NTSC video mode
-  if (system.IsTriforce())
-  {
-    config.m_region = DiscIO::Region::NTSC_J;
-  }
-
   // PAL Wii uses NTSC framerate and linecount in 60Hz modes
   system.GetVideoInterface().Preset(DiscIO::IsNTSC(config.m_region) ||
                                     (system.IsWii() && Config::Get(Config::SYSCONF_PAL60)));
@@ -529,7 +508,6 @@ bool CBoot::BootUp(Core::System& system, const Core::CPUThreadGuard& guard,
       NOTICE_LOG_FMT(BOOT, "Booting from disc: {}", disc.path);
       const DiscIO::VolumeDisc* volume =
           SetDisc(system.GetDVDInterface(), std::move(disc.volume), disc.auto_disc_change_paths);
-      AchievementManager::GetInstance().LoadGame(volume);
 
       if (!volume)
         return false;
@@ -552,7 +530,7 @@ bool CBoot::BootUp(Core::System& system, const Core::CPUThreadGuard& guard,
 
       auto& ppc_state = system.GetPPCState();
 
-      SetupMSR(system);
+      SetupMSR(ppc_state);
       SetupHID(ppc_state, system.IsWii());
       SetupBAT(system, system.IsWii());
       CopyDefaultExceptionHandlers(system);
@@ -648,16 +626,16 @@ bool CBoot::BootUp(Core::System& system, const Core::CPUThreadGuard& guard,
       if (!Load_BS2(system, ipl.path))
         return false;
 
-      const DiscIO::VolumeDisc* volume = nullptr;
       if (ipl.disc)
       {
         NOTICE_LOG_FMT(BOOT, "Inserting disc: {}", ipl.disc->path);
-
-        volume = SetDisc(system.GetDVDInterface(), DiscIO::CreateDiscForCore(ipl.disc->path),
-                         ipl.disc->auto_disc_change_paths);
+        SetDisc(system.GetDVDInterface(), DiscIO::CreateDisc(ipl.disc->path),
+                ipl.disc->auto_disc_change_paths);
       }
-
-      AchievementManager::GetInstance().LoadGame(volume);
+      else
+      {
+        AchievementManager::GetInstance().LoadGame(nullptr);
+      }
 
       SConfig::OnTitleDirectlyBooted(guard);
       return true;
@@ -712,7 +690,7 @@ void StateFlags::UpdateChecksum()
   checksum = std::accumulate(flag_data.cbegin(), flag_data.cend(), 0U);
 }
 
-void UpdateStateFlags(const std::function<void(StateFlags*)>& update_function)
+void UpdateStateFlags(std::function<void(StateFlags*)> update_function)
 {
   CreateSystemMenuTitleDirs();
   const std::string file_path = Common::GetTitleDataPath(Titles::SYSTEM_MENU) + "/" WII_STATE;
@@ -725,13 +703,13 @@ void UpdateStateFlags(const std::function<void(StateFlags*)>& update_function)
 
   StateFlags state{};
   if (file->GetStatus()->size == sizeof(StateFlags))
-    (void)file->Read(&state, 1);
+    file->Read(&state, 1);
 
   update_function(&state);
   state.UpdateChecksum();
 
-  (void)file->Seek(0, IOS::HLE::FS::SeekMode::Set);
-  (void)file->Write(&state, 1);
+  file->Seek(0, IOS::HLE::FS::SeekMode::Set);
+  file->Write(&state, 1);
 }
 
 void CreateSystemMenuTitleDirs()

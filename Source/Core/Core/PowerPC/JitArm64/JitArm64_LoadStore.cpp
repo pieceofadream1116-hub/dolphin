@@ -559,11 +559,26 @@ void JitArm64::lmw(UGeckoInstruction inst)
     }
   }
 
-  BitSet32 gprs_to_undirty = ~js.op->gprWillBeWritten & BitSet32(0xFFFFFFFFU << d);
+  BitSet32 gprs_to_flush = ~js.op->gprInUse & BitSet32(0xFFFFFFFFU << d);
+  if (!js.op->gprInUse[a])
+  {
+    if (!a_is_addr_base_reg)
+    {
+      gprs_to_flush[a] = true;
+    }
+    else
+    {
+      gprs_to_flush[a] = false;
 
-  BitSet32 gprs_to_flush = ~(js.op->gprWillBeWritten | js.op->gprWillBeRead);
-  if (a_is_addr_base_reg)
-    gprs_to_flush[a] = false;
+      if (a + 1 == d && (std::countr_one((~js.op->gprInUse).m_val >> a) & 1) == 0)
+      {
+        // In this situation, we can save one store instruction by flushing GPR d together with GPR
+        // a, but we shouldn't flush GPR a until the end of the PPC instruction. Therefore, let's
+        // also wait with flushing GPR d until the end of the PPC instruction.
+        gprs_to_flush[d] = false;
+      }
+    }
+  }
 
   // TODO: This doesn't handle rollback on DSI correctly
   constexpr u32 flags = BackPatchInfo::FLAG_LOAD | BackPatchInfo::FLAG_SIZE_32;
@@ -599,20 +614,18 @@ void JitArm64::lmw(UGeckoInstruction inst)
     {
       gpr.DiscardRegisters(BitSet32{int(i)});
     }
-    else if (gprs_to_undirty[i])
+    else if (gprs_to_flush[i])
     {
-      BitSet32 gprs_to_undirty_this_time{};
-      if (i != 0 && gprs_to_undirty[i - 1])
-        gprs_to_undirty_this_time = BitSet32{int(i - 1), int(i)};
-      else if (i == 31 || !gprs_to_undirty[i + 1])
-        gprs_to_undirty_this_time = BitSet32{int(i)};
+      BitSet32 gprs_to_flush_this_time{};
+      if (i != 0 && gprs_to_flush[i - 1])
+        gprs_to_flush_this_time = BitSet32{int(i - 1), int(i)};
+      else if (i == 31 || !gprs_to_flush[i + 1])
+        gprs_to_flush_this_time = BitSet32{int(i)};
       else
         continue;
 
-      gpr.FlushRegisters(gprs_to_undirty_this_time, FlushMode::Undirty, ARM64Reg::INVALID_REG);
-      gpr.FlushRegisters(gprs_to_undirty_this_time & gprs_to_flush, FlushMode::Full,
-                         ARM64Reg::INVALID_REG);
-      gprs_to_undirty &= ~gprs_to_undirty_this_time;
+      gpr.StoreRegisters(gprs_to_flush_this_time);
+      gprs_to_flush &= ~gprs_to_flush_this_time;
     }
   }
 
@@ -664,7 +677,27 @@ void JitArm64::stmw(UGeckoInstruction inst)
     }
   }
 
-  const BitSet32 gprs_to_flush = ~(js.op->gprWillBeRead | js.op->gprWillBeWritten);
+  const BitSet32 dirty_gprs_to_flush_unmasked = ~js.op->gprInUse & gpr.GetDirtyGPRs();
+  BitSet32 dirty_gprs_to_flush = dirty_gprs_to_flush_unmasked & BitSet32(0xFFFFFFFFU << s);
+  if (dirty_gprs_to_flush_unmasked[a])
+  {
+    if (!a_is_addr_base_reg)
+    {
+      dirty_gprs_to_flush[a] = true;
+    }
+    else
+    {
+      dirty_gprs_to_flush[a] = false;
+
+      if (a + 1 == s && (std::countr_one((~js.op->gprInUse).m_val >> a) & 1) == 0)
+      {
+        // In this situation, we can save one store instruction by flushing GPR s together with GPR
+        // a, but we shouldn't flush GPR a until the end of the PPC instruction. Therefore, let's
+        // also wait with flushing GPR s until the end of the PPC instruction.
+        dirty_gprs_to_flush[s] = false;
+      }
+    }
+  }
 
   // TODO: This doesn't handle rollback on DSI correctly
   constexpr u32 flags = BackPatchInfo::FLAG_STORE | BackPatchInfo::FLAG_SIZE_32;
@@ -687,12 +720,34 @@ void JitArm64::stmw(UGeckoInstruction inst)
     EmitBackpatchRoutine(flags, MemAccessMode::Auto, src_reg, EncodeRegTo64(addr_reg), regs_in_use,
                          fprs_in_use);
 
-    // To reduce register pressure, flush registers that would be flushed after this instruction
-    // anyway.
+    // To reduce register pressure and to avoid getting a pipeline-unfriendly long run of stores
+    // after this instruction, flush registers that would be flushed after this instruction anyway.
+    //
+    // We try to store two registers at a time when possible to let the register cache use STP.
     if (gprs_to_discard[i])
+    {
       gpr.DiscardRegisters(BitSet32{int(i)});
-    else if (gprs_to_flush[i])
-      gpr.FlushRegisters(BitSet32{int(i)}, FlushMode::Full, ARM64Reg::INVALID_REG);
+    }
+    else if (dirty_gprs_to_flush[i])
+    {
+      BitSet32 gprs_to_flush_this_time{};
+      if (i != 0 && dirty_gprs_to_flush[i - 1])
+        gprs_to_flush_this_time = BitSet32{int(i - 1), int(i)};
+      else if (i == 31 || !dirty_gprs_to_flush[i + 1])
+        gprs_to_flush_this_time = BitSet32{int(i)};
+      else
+        continue;
+
+      gpr.StoreRegisters(gprs_to_flush_this_time);
+      dirty_gprs_to_flush &= ~gprs_to_flush_this_time;
+    }
+    else if (!js.op->gprInUse[i])
+    {
+      // If this register can be flushed but it isn't dirty, no store instruction will be emitted
+      // when flushing it, so it doesn't matter if we flush it together with another register or
+      // not. Let's just flush it in the simplest way possible.
+      gpr.StoreRegisters(BitSet32{int(i)});
+    }
   }
 
   gpr.Unlock(ARM64Reg::W1, ARM64Reg::W2, ARM64Reg::W30);
@@ -702,11 +757,10 @@ void JitArm64::stmw(UGeckoInstruction inst)
 
 void JitArm64::dcbx(UGeckoInstruction inst)
 {
-  INSTRUCTION_START
-  JITDISABLE(bJITLoadStoreOff);
   FALLBACK_IF(m_accurate_cpu_cache_enabled);
 
-  // See Interpreter::dcbf comment on explanation of why this invalidates the block cache.
+  INSTRUCTION_START
+  JITDISABLE(bJITLoadStoreOff);
 
   u32 a = inst.RA, b = inst.RB;
 
@@ -772,21 +826,36 @@ void JitArm64::dcbx(UGeckoInstruction inst)
     // Load the loop_counter register with the amount of invalidations to execute.
     ADD(loop_counter, WA, 1);
 
-    if (IsBranchWatchEnabled())
+    if (IsDebuggingEnabled())
     {
+      const ARM64Reg branch_watch = EncodeRegTo64(reg_cycle_count);
+      MOVP2R(branch_watch, &m_branch_watch);
+      LDRB(IndexType::Unsigned, WB, branch_watch, Core::BranchWatch::GetOffsetOfRecordingActive());
+      FixupBranch branch_over = CBZ(WB);
+
+      FixupBranch branch_in = B();
+      SwitchToFarCode();
+      SetJumpTarget(branch_in);
+
       const BitSet32 gpr_caller_save =
           gpr.GetCallerSavedUsed() &
           ~BitSet32{DecodeReg(WB), DecodeReg(reg_cycle_count), DecodeReg(reg_downcount)};
       ABI_PushRegisters(gpr_caller_save);
+      const ARM64Reg float_emit_tmp = EncodeRegTo64(WB);
       const BitSet32 fpr_caller_save = fpr.GetCallerSavedUsed();
-      m_float_emit.ABI_PushRegisters(fpr_caller_save, ARM64Reg::X8);
+      m_float_emit.ABI_PushRegisters(fpr_caller_save, float_emit_tmp);
       const PPCAnalyst::CodeOp& op = js.op[2];
       ABI_CallFunction(m_ppc_state.msr.IR ? &Core::BranchWatch::HitVirtualTrue_fk_n :
                                             &Core::BranchWatch::HitPhysicalTrue_fk_n,
-                       &m_branch_watch, Core::FakeBranchWatchCollectionKey{op.address, op.branchTo},
+                       branch_watch, Core::FakeBranchWatchCollectionKey{op.address, op.branchTo},
                        op.inst.hex, WA);
-      m_float_emit.ABI_PopRegisters(fpr_caller_save, ARM64Reg::X8);
+      m_float_emit.ABI_PopRegisters(fpr_caller_save, float_emit_tmp);
       ABI_PopRegisters(gpr_caller_save);
+
+      FixupBranch branch_out = B();
+      SwitchToNearCode();
+      SetJumpTarget(branch_out);
+      SetJumpTarget(branch_over);
     }
   }
 
@@ -814,14 +883,10 @@ void JitArm64::dcbx(UGeckoInstruction inst)
     bat_lookup_failed =
         BATAddressLookup(physical_addr, effective_addr, WA, m_mmu.GetIBATTable().data());
     BFI(physical_addr, effective_addr, 0, PowerPC::BAT_INDEX_SHIFT);
-    // Check whether a JIT cache line needs to be invalidated.
-    LSR(physical_addr, physical_addr, 5 + 5);  // >> 5 for cache line size, >> 5 for width of bitset
-  }
-  else
-  {
-    LSR(physical_addr, effective_addr, 5 + 5);
   }
 
+  // Check whether a JIT cache line needs to be invalidated.
+  LSR(physical_addr, physical_addr, 5 + 5);  // >> 5 for cache line size, >> 5 for width of bitset
   MOVP2R(EncodeRegTo64(WA), GetBlockCache()->GetBlockBitSet());
   LDR(physical_addr, EncodeRegTo64(WA), ArithOption(EncodeRegTo64(physical_addr), true));
 
@@ -878,6 +943,25 @@ void JitArm64::dcbx(UGeckoInstruction inst)
   gpr.Unlock(WA, WB);
   if (make_loop)
     gpr.Unlock(loop_counter);
+}
+
+void JitArm64::dcbt(UGeckoInstruction inst)
+{
+  INSTRUCTION_START
+  JITDISABLE(bJITLoadStoreOff);
+
+  // Prefetch. Since we don't emulate the data cache, we don't need to do anything.
+
+  // If a dcbst follows a dcbt, it probably isn't a case of dynamic code
+  // modification, so don't bother invalidating the jit block cache.
+  // This is important because invalidating the block cache when we don't
+  // need to is terrible for performance.
+  // (Invalidating the jit block cache on dcbst is a heuristic.)
+  if (CanMergeNextInstructions(1) && js.op[1].inst.OPCD == 31 && js.op[1].inst.SUBOP10 == 54 &&
+      js.op[1].inst.RA == inst.RA && js.op[1].inst.RB == inst.RB)
+  {
+    js.skipInstructions = 1;
+  }
 }
 
 void JitArm64::dcbz(UGeckoInstruction inst)

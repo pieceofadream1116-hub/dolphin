@@ -3,7 +3,9 @@
 
 #include "Common/Assembler/GekkoParser.h"
 
+#include <algorithm>
 #include <array>
+#include <functional>
 
 #include <fmt/format.h>
 

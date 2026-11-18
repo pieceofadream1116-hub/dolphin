@@ -9,7 +9,7 @@
 #pragma once
 
 #include <windows.h>
-#include <xinput.h>
+#include <XInput.h>
 
 #include "InputCommon/ControllerInterface/ControllerInterface.h"
 

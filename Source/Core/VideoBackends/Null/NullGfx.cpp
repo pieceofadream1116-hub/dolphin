@@ -34,7 +34,7 @@ bool NullGfx::SupportsUtilityDrawing() const
 }
 
 std::unique_ptr<AbstractTexture> NullGfx::CreateTexture(const TextureConfig& config,
-                                                        std::string_view /* name */)
+                                                        [[maybe_unused]] std::string_view name)
 {
   return std::make_unique<NullTexture>(config);
 }
@@ -52,17 +52,15 @@ public:
 };
 
 std::unique_ptr<AbstractShader>
-NullGfx::CreateShaderFromSource(ShaderStage stage, std::string_view /* source */,
-                                VideoCommon::ShaderIncluder* /* shader_includer */,
-                                std::string_view /* name */)
+NullGfx::CreateShaderFromSource(ShaderStage stage, [[maybe_unused]] std::string_view source,
+                                [[maybe_unused]] std::string_view name)
 {
   return std::make_unique<NullShader>(stage);
 }
 
-std::unique_ptr<AbstractShader> NullGfx::CreateShaderFromBinary(ShaderStage stage,
-                                                                const void* /* data */,
-                                                                size_t /* length */,
-                                                                std::string_view /* name */)
+std::unique_ptr<AbstractShader>
+NullGfx::CreateShaderFromBinary(ShaderStage stage, const void* data, size_t length,
+                                [[maybe_unused]] std::string_view name)
 {
   return std::make_unique<NullShader>(stage);
 }
@@ -93,25 +91,24 @@ NullGfx::CreateNativeVertexFormat(const PortableVertexDeclaration& vtx_decl)
   return std::make_unique<NativeVertexFormat>(vtx_decl);
 }
 
-void NullEFBInterface::ReinterpretPixelData(FramebufferManager* framebuffer_manager,
-                                            EFBReinterpretType convtype)
+void NullEFBInterface::ReinterpretPixelData(EFBReinterpretType convtype)
 {
 }
 
-void NullEFBInterface::PokeColor(FramebufferManager* framebuffer_manager, u16 x, u16 y, u32 color)
+void NullEFBInterface::PokeColor(u16 x, u16 y, u32 color)
 {
 }
 
-void NullEFBInterface::PokeDepth(FramebufferManager* framebuffer_manager, u16 x, u16 y, u32 depth)
+void NullEFBInterface::PokeDepth(u16 x, u16 y, u32 depth)
 {
 }
 
-u32 NullEFBInterface::PeekColorInternal(FramebufferManager* framebuffer_manager, u16 x, u16 y)
+u32 NullEFBInterface::PeekColorInternal(u16 x, u16 y)
 {
   return 0;
 }
 
-u32 NullEFBInterface::PeekDepthInternal(FramebufferManager* framebuffer_manager, u16 x, u16 y)
+u32 NullEFBInterface::PeekDepthInternal(u16 x, u16 y)
 {
   return 0;
 }

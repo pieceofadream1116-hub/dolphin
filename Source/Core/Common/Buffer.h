@@ -7,25 +7,35 @@
 
 // UniqueBuffer<T> and SharedBuffer<T> are a lighter alternative to std::vector<T>.
 // The main benefit is that elements are not value-initialized like in vector.
-// That can be quite a bit of unnecessary overhead when allocating a large buffer.
+// That can be quite a bit of unecessary overhead when allocating a large buffer.
 
 namespace Common
 {
 
 namespace detail
 {
-template <auto MakeFunc>
+template <typename T>
+struct UniqueBufferMaker
+{
+  template <typename SizeType>
+  static auto make(SizeType size) -> decltype(std::make_unique_for_overwrite<T[]>(size))
+  {
+    return std::make_unique_for_overwrite<T[]>(size);
+  }
+};
+
+template <typename T>
 class BufferBase final
 {
 public:
-  using PtrType = decltype(MakeFunc(1));
+  using PtrType = std::unique_ptr<T[]>;
 
-  using value_type = PtrType::element_type;
+  using value_type = T;
   using size_type = std::size_t;
 
   BufferBase() {}
   BufferBase(PtrType ptr, size_type new_size) : m_ptr{std::move(ptr)}, m_size{new_size} {}
-  explicit BufferBase(size_type new_size) : BufferBase{MakeFunc(new_size), new_size} {}
+  explicit BufferBase(size_type new_size) : BufferBase{std::make_unique_for_overwrite<T[]>(new_size), new_size} {}
 
   BufferBase(const BufferBase&) = default;
   BufferBase& operator=(const BufferBase&) = default;
@@ -83,7 +93,7 @@ private:
 }  // namespace detail
 
 template <typename T>
-using UniqueBuffer = detail::BufferBase<std::make_unique_for_overwrite<T[]>>;
+using UniqueBuffer = detail::BufferBase<T>;
 
 // TODO: std::make_shared_for_overwrite requires GCC 12.1+
 // template <typename T>

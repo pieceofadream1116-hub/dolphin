@@ -10,6 +10,7 @@
 #include <string>
 #include <type_traits>
 
+#include "Common/Buffer.h"
 #include "Common/CommonTypes.h"
 
 namespace Core
@@ -80,34 +81,33 @@ struct StateExtendedHeader
 };
 
 void Init(Core::System& system);
+
 void Shutdown();
+
+void EnableCompression(bool compression);
+
+bool ReadHeader(const std::string& filename, StateHeader& header);
 
 // Returns a string containing information of the savestate in the given slot
 // which can be presented to the user for identification purposes
-std::string GetInfoStringOfSlot(u32 slot, bool translate = true);
+std::string GetInfoStringOfSlot(int slot, bool translate = true);
 
 // Returns when the savestate in the given slot was created, or 0 if the slot is empty.
-u64 GetUnixTimeOfSlot(u32 slot);
+u64 GetUnixTimeOfSlot(int slot);
 
 // These don't happen instantly - they get scheduled as events.
 // ...But only if we're not in the main CPU thread.
-//    If we're in the main CPU thread then they run immediately instead.
-void Save(Core::System& system, u32 slot);
-void Load(Core::System& system, u32 slot);
+//    If we're in the main CPU thread then they run immediately instead
+//    because some things (like Lua) need them to run immediately.
+// Slots from 0-99.
+void Save(Core::System& system, int slot, bool wait = false);
+void Load(Core::System& system, int slot);
 
-u32 GetSelectedSlot();
-void SetSelectedSlot(u32 slot);
+void SaveAs(Core::System& system, const std::string& filename, bool wait = false);
+void LoadAs(Core::System& system, const std::string& filename);
 
-void SelectSlot(u32 slot);
-
-u32 GetNextSlot();
-u32 GetPreviousSlot();
-
-void SaveSelected(Core::System& system);
-void LoadSelected(Core::System& system);
-
-void SaveAs(Core::System& system, std::string filename);
-void LoadAs(Core::System& system, std::string filename);
+void SaveToBuffer(Core::System& system, Common::UniqueBuffer<u8>& buffer);
+void LoadFromBuffer(Core::System& system, Common::UniqueBuffer<u8>& buffer);
 
 void LoadLastSaved(Core::System& system, int i = 1);
 void SaveFirstSaved(Core::System& system);

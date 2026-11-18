@@ -12,12 +12,15 @@
 #include "Common/CommonTypes.h"
 #include "Common/GekkoDisassembler.h"
 #include "Common/Logging/Log.h"
+#include "Common/StringUtil.h"
 #include "Core/Config/MainSettings.h"
 #include "Core/Core.h"
 #include "Core/CoreTiming.h"
 #include "Core/Debugger/Debugger_SymbolMap.h"
 #include "Core/HLE/HLE.h"
 #include "Core/HW/CPU.h"
+#include "Core/Host.h"
+#include "Core/PowerPC/GDBStub.h"
 #include "Core/PowerPC/Interpreter/ExceptionUtils.h"
 #include "Core/PowerPC/MMU.h"
 #include "Core/PowerPC/PPCTables.h"
@@ -70,11 +73,9 @@ Interpreter::Interpreter(Core::System& system, PowerPC::PowerPCState& ppc_state,
 
 Interpreter::~Interpreter() = default;
 
-bool Interpreter::Init()
+void Interpreter::Init()
 {
   m_end_block = false;
-
-  return true;
 }
 
 void Interpreter::Shutdown()
@@ -292,7 +293,7 @@ void Interpreter::unknown_instruction(Interpreter& interpreter, UGeckoInstructio
   Core::CPUThreadGuard guard(system);
 
   const u32 last_pc = interpreter.m_last_pc;
-  const u32 opcode = PowerPC::MMU::HostRead<u32>(guard, last_pc);
+  const u32 opcode = PowerPC::MMU::HostRead_U32(guard, last_pc);
   const std::string disasm = Common::GekkoDisassembler::Disassemble(opcode, last_pc);
   NOTICE_LOG_FMT(POWERPC, "Last PC = {:08x} : {}", last_pc, disasm);
   Dolphin_Debugger::PrintCallstack(guard, Common::Log::LogType::POWERPC,

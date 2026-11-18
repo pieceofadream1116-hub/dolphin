@@ -3,24 +3,28 @@
 
 #include "Common/FileUtil.h"
 
+#include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
+#include <fstream>
 #include <limits.h>
 #include <stack>
 #include <string>
+#include <sys/stat.h>
 #include <system_error>
+#include <thread>
 #include <vector>
 
+#include "Common/Assert.h"
+#include "Common/Common.h"
 #include "Common/CommonFuncs.h"
 #include "Common/CommonPaths.h"
 #include "Common/CommonTypes.h"
-#ifdef ANDROID
-#include "Common/Assert.h"
-#endif
 #ifdef __APPLE__
 #include "Common/DynamicLibrary.h"
 #endif
@@ -29,14 +33,20 @@
 #include "Common/StringUtil.h"
 
 #ifdef _WIN32
-#include <windows.h>
+#include <Windows.h>
+#include <Shlwapi.h>
 #include <commdlg.h>  // for GetSaveFileName
 #include <direct.h>   // getcwd
 #include <io.h>
 #include <objbase.h>  // guid stuff
 #include <shellapi.h>
-#include <shlwapi.h>
+
+#ifdef WINRT_XBOX
+#include "DolphinWinRT/UWPUtils.h"
+#endif
 #else
+#include <dirent.h>
+#include <errno.h>
 #include <libgen.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -83,7 +93,7 @@ static DolSecTranslocateCreateOriginalPathForURL s_create_orig_path;
 FileInfo::FileInfo(const std::string& path) : FileInfo(path.c_str())
 {
 }
-
+#pragma optimize("", off)
 FileInfo::FileInfo(const char* path)
 {
 #ifdef ANDROID
@@ -111,6 +121,7 @@ bool FileInfo::Exists() const
 {
   return m_exists;
 }
+#pragma optimize("", on)
 
 bool FileInfo::IsDirectory() const
 {
@@ -227,6 +238,56 @@ bool CreateDirs(std::string_view path)
 
 bool CreateFullPath(std::string_view fullPath)
 {
+#if WINRT_XBOX
+  int panicCounter = 100;
+  DEBUG_LOG_FMT(COMMON, "CreateFullPath: path {}", fullPath);
+
+  if (fs::exists(fullPath))
+  {
+    DEBUG_LOG_FMT(COMMON, "CreateFullPath: path exists {}", fullPath);
+    return true;
+  }
+
+  size_t position = 0;
+  while (true)
+  {
+    // Find next sub path
+    position = fullPath.find(DIR_SEP_CHR, position);
+
+    // we're done, yay!
+    if (position == fullPath.npos)
+      return true;
+
+    // Include the '/' so the first call is CreateDir("/") rather than CreateDir("")
+    std::string const subPath(fullPath.substr(0, position + 1));
+
+    if (subPath.starts_with("Q:"))
+    {
+      auto base = std::filesystem::path(UWP::GetLocalFolder()).make_preferred().native();
+      auto sub = std::filesystem::path(subPath).make_preferred().native();
+
+      // If we're on the write-protected drive and not in our app folder, skip trying to check this
+      // exists.
+      if (sub.rfind(base) != 0)
+      {
+        position++;
+        continue;
+      }
+    }
+
+    if (!IsDirectory(subPath))
+      File::CreateDir(subPath);
+
+    // A safety check
+    panicCounter--;
+    if (panicCounter <= 0)
+    {
+      ERROR_LOG_FMT(COMMON, "CreateFullPath: directory structure is too deep");
+      return false;
+    }
+    position++;
+  }
+#else
   DEBUG_LOG_FMT(COMMON, "{}: path {}", __func__, fullPath);
 
   std::error_code error;
@@ -239,6 +300,7 @@ bool CreateFullPath(std::string_view fullPath)
   if (!success)
     ERROR_LOG_FMT(COMMON, "{}: failed on {}: {}", __func__, fullPath, error.message());
   return success;
+#endif
 }
 
 // Deletes a directory filename, returns true on success
@@ -425,7 +487,7 @@ static FSTEntry ScanDirectoryTreeAndroidContent(std::string directory, bool recu
 #endif
 
 // Recursive or non-recursive list of files and directories under directory.
-FSTEntry ScanDirectoryTree(const std::string& directory, bool recursive)
+FSTEntry ScanDirectoryTree(std::string directory, bool recursive)
 {
   DEBUG_LOG_FMT(COMMON, "{}: directory {}", __func__, directory);
 
@@ -522,9 +584,9 @@ bool DeleteDirRecursively(const std::string& directory)
 
   std::error_code error;
   const std::uintmax_t num_removed = std::filesystem::remove_all(StringToPath(directory), error);
-  const bool success = num_removed != static_cast<std::uintmax_t>(-1) && !error;
+  const bool success = num_removed != 0 && !error;
   if (!success)
-    ERROR_LOG_FMT(COMMON, "{}: {} failed. {}", __func__, directory, error.message());
+    ERROR_LOG_FMT(COMMON, "{}: {} failed {}", __func__, directory, error.message());
   return success;
 }
 
@@ -740,11 +802,6 @@ std::string GetExePath()
   if (sysctl(name, 4, dolphin_exe_path.data(), &length, nullptr, 0) != 0)
     return {};
   return dolphin_exe_path;
-#elif defined(__OpenBSD__) && defined(HAVE_GETEXECPATH)
-  char dolphin_exe_path[PATH_MAX];
-  if (getexecpath(dolphin_exe_path, sizeof(dolphin_exe_path)) != 0)
-    return {};
-  return dolphin_exe_path;
 #else
   char dolphin_exe_path[PATH_MAX];
   ssize_t len = ::readlink("/proc/self/exe", dolphin_exe_path, sizeof(dolphin_exe_path));
@@ -764,27 +821,27 @@ std::string GetExeDirectory()
 
 static std::string CreateSysDirectoryPath()
 {
-#define SYS_FOLDER_NAME "Sys"
-#if defined __APPLE__
-#define SYSDATA_DIR "Contents/Resources/" SYS_FOLDER_NAME
+#if defined(_WIN32) || defined(LINUX_LOCAL_DEV)
+#define SYSDATA_DIR "Sys"
+#elif defined __APPLE__
+#define SYSDATA_DIR "Contents/Resources/Sys"
 #else
-#define SYSDATA_DIR DATA_DIR SYS_FOLDER_NAME
+#ifdef DATA_DIR
+#define SYSDATA_DIR DATA_DIR "sys"
+#else
+#define SYSDATA_DIR "sys"
+#endif
 #endif
 
-  std::string sys_directory;
-
 #if defined(__APPLE__)
-  sys_directory = GetBundleDirectory() + DIR_SEP SYSDATA_DIR DIR_SEP;
+  const std::string sys_directory = GetBundleDirectory() + DIR_SEP SYSDATA_DIR DIR_SEP;
+#elif defined(_WIN32) || defined(LINUX_LOCAL_DEV)
+  const std::string sys_directory = GetExeDirectory() + DIR_SEP SYSDATA_DIR DIR_SEP;
 #elif defined ANDROID
-  sys_directory = s_android_sys_directory + DIR_SEP;
+  const std::string sys_directory = s_android_sys_directory + DIR_SEP;
   ASSERT_MSG(COMMON, !s_android_sys_directory.empty(), "Sys directory has not been set");
 #else
-  const std::string local_sys_directory = GetExeDirectory() + DIR_SEP SYS_FOLDER_NAME DIR_SEP;
-  if (IsDirectory(local_sys_directory))
-    sys_directory = local_sys_directory;
-  else
-    sys_directory = SYSDATA_DIR DIR_SEP;
-
+  const std::string sys_directory = SYSDATA_DIR DIR_SEP;
 #endif
 
   INFO_LOG_FMT(COMMON, "CreateSysDirectoryPath: Setting to {}", sys_directory);
@@ -843,7 +900,6 @@ static void RebuildUserDirectories(unsigned int dir_index)
   case D_USER_IDX:
     s_user_paths[D_GCUSER_IDX] = s_user_paths[D_USER_IDX] + GC_USER_DIR DIR_SEP;
     s_user_paths[D_WIIROOT_IDX] = s_user_paths[D_USER_IDX] + WII_USER_DIR DIR_SEP;
-    s_user_paths[D_TRIUSER_IDX] = s_user_paths[D_USER_IDX] + TRI_USER_DIR DIR_SEP;
     s_user_paths[D_CONFIG_IDX] = s_user_paths[D_USER_IDX] + CONFIG_DIR DIR_SEP;
     s_user_paths[D_GAMESETTINGS_IDX] = s_user_paths[D_USER_IDX] + GAMESETTINGS_DIR DIR_SEP;
     s_user_paths[D_MAPS_IDX] = s_user_paths[D_USER_IDX] + MAPS_DIR DIR_SEP;
@@ -872,8 +928,10 @@ static void RebuildUserDirectories(unsigned int dir_index)
     s_user_paths[D_DUMPDEBUG_JITBLOCKS_IDX] =
         s_user_paths[D_DUMPDEBUG_IDX] + DUMP_DEBUG_JITBLOCKS_DIR DIR_SEP;
     s_user_paths[D_LOGS_IDX] = s_user_paths[D_USER_IDX] + LOGS_DIR DIR_SEP;
+    s_user_paths[D_MAILLOGS_IDX] = s_user_paths[D_LOGS_IDX] + MAIL_LOGS_DIR DIR_SEP;
     s_user_paths[D_THEMES_IDX] = s_user_paths[D_USER_IDX] + THEMES_DIR DIR_SEP;
     s_user_paths[D_STYLES_IDX] = s_user_paths[D_USER_IDX] + STYLES_DIR DIR_SEP;
+    s_user_paths[D_BACKGROUNDS_IDX] = s_user_paths[D_USER_IDX] + BACKGROUNDS_DIR DIR_SEP;
     s_user_paths[D_PIPES_IDX] = s_user_paths[D_USER_IDX] + PIPES_DIR DIR_SEP;
     s_user_paths[D_WFSROOT_IDX] = s_user_paths[D_USER_IDX] + WFSROOT_DIR DIR_SEP;
     s_user_paths[D_BACKUP_IDX] = s_user_paths[D_USER_IDX] + BACKUP_DIR DIR_SEP;
@@ -882,7 +940,6 @@ static void RebuildUserDirectories(unsigned int dir_index)
     s_user_paths[D_GRAPHICSMOD_IDX] = s_user_paths[D_LOAD_IDX] + GRAPHICSMOD_DIR DIR_SEP;
     s_user_paths[D_BANNERS_WIIROOT_IDX] = s_user_paths[D_LOAD_IDX] + WIIBANNERS_DIR DIR_SEP;
     s_user_paths[D_FIRMWARE_IDX] = s_user_paths[D_LOAD_IDX] + FIRMWARE_DIR DIR_SEP;
-    s_user_paths[D_WIISYSCONF_IDX] = s_user_paths[D_WIIROOT_IDX] + WII_SYSCONF_DIR DIR_SEP;
     s_user_paths[D_WIISDCARDSYNCFOLDER_IDX] = s_user_paths[D_LOAD_IDX] + WIISDSYNC_DIR DIR_SEP;
     s_user_paths[F_DOLPHINCONFIG_IDX] = s_user_paths[D_CONFIG_IDX] + DOLPHIN_CONFIG;
     s_user_paths[F_GCPADCONFIG_IDX] = s_user_paths[D_CONFIG_IDX] + GCPAD_CONFIG;
@@ -902,7 +959,6 @@ static void RebuildUserDirectories(unsigned int dir_index)
     s_user_paths[F_FAKEVMEMDUMP_IDX] = s_user_paths[D_DUMP_IDX] + FAKEVMEM_DUMP;
     s_user_paths[F_GCSRAM_IDX] = s_user_paths[D_GCUSER_IDX] + GC_SRAM;
     s_user_paths[F_WIISDCARDIMAGE_IDX] = s_user_paths[D_LOAD_IDX] + WII_SD_CARD_IMAGE;
-    s_user_paths[F_WIISYSCONF_IDX] = s_user_paths[D_WIISYSCONF_IDX] + WII_SYSCONF;
 
     s_user_paths[D_MEMORYWATCHER_IDX] = s_user_paths[D_USER_IDX] + MEMORYWATCHER_DIR DIR_SEP;
     s_user_paths[F_MEMORYWATCHERLOCATIONS_IDX] =
@@ -915,7 +971,6 @@ static void RebuildUserDirectories(unsigned int dir_index)
     s_user_paths[F_GBABIOS_IDX] = s_user_paths[D_GBAUSER_IDX] + GBA_BIOS;
 
     s_user_paths[D_ASM_ROOT_IDX] = s_user_paths[D_USER_IDX] + ASSEMBLY_DIR DIR_SEP;
-    s_user_paths[D_SOUNDS_IDX] = s_user_paths[D_LOAD_IDX] + SOUNDS_DIR DIR_SEP;
 
     // The shader cache has moved to the cache directory, so remove the old one.
     // TODO: remove that someday.
@@ -967,6 +1022,7 @@ static void RebuildUserDirectories(unsigned int dir_index)
     break;
 
   case D_LOGS_IDX:
+    s_user_paths[D_MAILLOGS_IDX] = s_user_paths[D_LOGS_IDX] + MAIL_LOGS_DIR DIR_SEP;
     s_user_paths[F_MAINLOG_IDX] = s_user_paths[D_LOGS_IDX] + MAIN_LOG;
     break;
 
@@ -976,7 +1032,6 @@ static void RebuildUserDirectories(unsigned int dir_index)
     s_user_paths[D_DYNAMICINPUT_IDX] = s_user_paths[D_LOAD_IDX] + DYNAMICINPUT_DIR DIR_SEP;
     s_user_paths[D_GRAPHICSMOD_IDX] = s_user_paths[D_LOAD_IDX] + GRAPHICSMOD_DIR DIR_SEP;
     s_user_paths[D_BANNERS_WIIROOT_IDX] = s_user_paths[D_LOAD_IDX] + WIIBANNERS_DIR DIR_SEP;
-    s_user_paths[D_SOUNDS_IDX] = s_user_paths[D_LOAD_IDX] + SOUNDS_DIR DIR_SEP;
     break;
   }
 }

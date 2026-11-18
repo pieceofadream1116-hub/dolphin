@@ -3,7 +3,9 @@
 
 #include "DolphinQt/NetPlay/ChunkedProgressDialog.h"
 
+#include <algorithm>
 #include <cmath>
+#include <functional>
 
 #include <fmt/format.h>
 
@@ -65,7 +67,7 @@ void ChunkedProgressDialog::ConnectWidgets()
 }
 
 void ChunkedProgressDialog::show(const QString& title, const u64 data_size,
-                                 std::span<const int> players)
+                                 const std::vector<int>& players)
 {
   m_progress_box->setTitle(title);
   m_data_size = data_size;

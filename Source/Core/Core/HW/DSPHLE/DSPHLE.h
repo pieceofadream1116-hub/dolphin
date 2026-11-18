@@ -34,8 +34,7 @@ public:
   void Shutdown() override;
   bool IsLLE() const override { return false; }
   void DoState(PointerWrap& p) override;
-  void PauseAndLock() override;
-  void UnpauseAndUnlock() override;
+  void PauseAndLock(bool do_lock) override;
 
   void DSP_WriteMailBoxHigh(bool cpu_mailbox, u16 value) override;
   void DSP_WriteMailBoxLow(bool cpu_mailbox, u16 value) override;

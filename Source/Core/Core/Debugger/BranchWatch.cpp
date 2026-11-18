@@ -6,7 +6,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
-#include <functional>
+
+#include <fmt/format.h>
 
 #include "Common/Assert.h"
 #include "Common/BitField.h"
@@ -118,7 +119,9 @@ void BranchWatch::Load(const CPUThreadGuard& guard, std::FILE* file)
 
     if (snapshot_metadata.is_selected)
     {
-      m_selection.emplace_back(&*kv_iter, is_virtual, condition, snapshot_metadata.inspection);
+      // TODO C++20: Parenthesized initialization of aggregates has bad compiler support.
+      m_selection.emplace_back(BranchWatchSelectionValueType{&*kv_iter, is_virtual, condition,
+                                                             snapshot_metadata.inspection});
     }
     else if (hits_snapshot != 0)
     {
@@ -142,7 +145,9 @@ void BranchWatch::IsolateHasExecuted(const CPUThreadGuard&)
       {
         if (kv.second.hits_snapshot == 0)
         {
-          m_selection.emplace_back(&kv, is_virtual, condition);
+          // TODO C++20: Parenthesized initialization of aggregates has bad compiler support.
+          m_selection.emplace_back(
+              BranchWatchSelectionValueType{&kv, is_virtual, condition, SelectionInspection{}});
           kv.second.hits_snapshot = kv.second.total_hits;
         }
       }
@@ -195,8 +200,7 @@ void BranchWatch::IsolateNotExecuted(const CPUThreadGuard&)
   }
 }
 
-void BranchWatch::IsolateOverwrittenShared(const CPUThreadGuard& guard,
-                                           const std::function<bool(u32, u32)>& compare_func)
+void BranchWatch::IsolateWasOverwritten(const CPUThreadGuard& guard)
 {
   if (Core::GetState(guard.GetSystem()) == Core::State::Uninitialized)
   {
@@ -219,7 +223,7 @@ void BranchWatch::IsolateOverwrittenShared(const CPUThreadGuard& guard,
               PowerPC::MMU::HostTryReadInstruction(guard, kv.first.origin_addr, address_space);
           if (!read_result.has_value())
             continue;
-          if (compare_func(kv.first.original_inst.hex, read_result->value))
+          if (kv.first.original_inst.hex == read_result->value)
             kv.second.hits_snapshot = ++m_blacklist_size;  // Any non-zero number will work.
         }
       }
@@ -231,27 +235,61 @@ void BranchWatch::IsolateOverwrittenShared(const CPUThreadGuard& guard,
     return;
   }
   case Phase::Reduction:
-    std::erase_if(m_selection, [&](const Selection::value_type& value) -> bool {
+    std::erase_if(m_selection, [&guard](const Selection::value_type& value) -> bool {
       const std::optional read_result = PowerPC::MMU::HostTryReadInstruction(
           guard, value.collection_ptr->first.origin_addr,
           value.is_virtual ? PowerPC::RequestedAddressSpace::Virtual :
                              PowerPC::RequestedAddressSpace::Physical);
       if (!read_result.has_value())
         return false;
-      return compare_func(value.collection_ptr->first.original_inst.hex, read_result->value);
+      return value.collection_ptr->first.original_inst.hex == read_result->value;
     });
     return;
   }
 }
 
-void BranchWatch::IsolateWasOverwritten(const CPUThreadGuard& guard)
-{
-  IsolateOverwrittenShared(guard, std::equal_to<u32>());
-}
-
 void BranchWatch::IsolateNotOverwritten(const CPUThreadGuard& guard)
 {
-  IsolateOverwrittenShared(guard, std::not_equal_to<u32>());
+  if (Core::GetState(guard.GetSystem()) == Core::State::Uninitialized)
+  {
+    ASSERT_MSG(CORE, false, "Core is uninitialized.");
+    return;
+  }
+  switch (m_recording_phase)
+  {
+  case Phase::Blacklist:
+  {
+    // Same dirty hack with != rather than ==, see above for details
+    const auto routine = [&](Collection& collection, PowerPC::RequestedAddressSpace address_space) {
+      for (Collection::value_type& kv : collection)
+        if (kv.second.hits_snapshot == 0)
+        {
+          const std::optional read_result =
+              PowerPC::MMU::HostTryReadInstruction(guard, kv.first.origin_addr, address_space);
+          if (!read_result.has_value())
+            continue;
+          if (kv.first.original_inst.hex != read_result->value)
+            kv.second.hits_snapshot = ++m_blacklist_size;  // Any non-zero number will work.
+        }
+    };
+    routine(m_collection_vt, PowerPC::RequestedAddressSpace::Virtual);
+    routine(m_collection_vf, PowerPC::RequestedAddressSpace::Virtual);
+    routine(m_collection_pt, PowerPC::RequestedAddressSpace::Physical);
+    routine(m_collection_pf, PowerPC::RequestedAddressSpace::Physical);
+    return;
+  }
+  case Phase::Reduction:
+    std::erase_if(m_selection, [&guard](const Selection::value_type& value) -> bool {
+      const std::optional read_result = PowerPC::MMU::HostTryReadInstruction(
+          guard, value.collection_ptr->first.origin_addr,
+          value.is_virtual ? PowerPC::RequestedAddressSpace::Virtual :
+                             PowerPC::RequestedAddressSpace::Physical);
+      if (!read_result.has_value())
+        return false;
+      return value.collection_ptr->first.original_inst.hex != read_result->value;
+    });
+    return;
+  }
 }
 
 void BranchWatch::UpdateHitsSnapshot()

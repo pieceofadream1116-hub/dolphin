@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <optional>
-#include <span>
 #include <string>
 #include <vector>
 
@@ -26,8 +24,8 @@ public:
 
   bool IsValid() const override { return m_is_valid; }
   bool IsWii() const override { return m_is_wii; }
-  bool IsAncast() const { return m_ancast_index.has_value(); }
-  u32 GetEntryPoint() const override { return m_dolheader.m_entrypoint; }
+  bool IsAncast() const { return m_is_ancast; }
+  u32 GetEntryPoint() const override { return m_dolheader.entryPoint; }
   bool LoadIntoMemory(Core::System& system, bool only_in_mem1 = false) const override;
   bool LoadSymbols(const Core::CPUThreadGuard& guard, PPCSymbolDB& ppc_symbol_db,
                    const std::string& filename) const override
@@ -42,38 +40,32 @@ private:
     DOL_NUM_DATA = 11
   };
 
-  struct DolHeader
+  struct SDolHeader
   {
-    u32 m_text_offset[DOL_NUM_TEXT];
-    u32 m_data_offset[DOL_NUM_DATA];
+    u32 textOffset[DOL_NUM_TEXT];
+    u32 dataOffset[DOL_NUM_DATA];
 
-    u32 m_text_address[DOL_NUM_TEXT];
-    u32 m_data_address[DOL_NUM_DATA];
+    u32 textAddress[DOL_NUM_TEXT];
+    u32 dataAddress[DOL_NUM_DATA];
 
-    u32 m_text_size[DOL_NUM_TEXT];
-    u32 m_data_size[DOL_NUM_DATA];
+    u32 textSize[DOL_NUM_TEXT];
+    u32 dataSize[DOL_NUM_DATA];
 
-    u32 m_bss_address;
-    u32 m_bss_size;
-    u32 m_entrypoint;
+    u32 bssAddress;
+    u32 bssSize;
+    u32 entryPoint;
   };
-  DolHeader m_dolheader;
+  SDolHeader m_dolheader;
 
-  struct LoadableSection
-  {
-    u32 m_address;
-    u32 m_header_section_size;
-    std::span<const u8> m_data;
-  };
-
-  std::vector<LoadableSection> m_sections;
+  std::vector<std::vector<u8>> m_data_sections;
+  std::vector<std::vector<u8>> m_text_sections;
 
   bool m_is_valid;
   bool m_is_wii;
-  std::optional<std::size_t> m_ancast_index;
+  bool m_is_ancast;
 
   // Copy sections to internal buffers
-  bool Initialize(std::span<const u8> buffer);
+  bool Initialize(const std::vector<u8>& buffer);
 
   bool LoadAncastIntoMemory(Core::System& system) const;
 };

@@ -9,17 +9,10 @@ import android.view.LayoutInflater
 import android.view.SurfaceHolder
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
 import androidx.fragment.app.Fragment
-import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.launch
 import org.dolphinemu.dolphinemu.NativeLibrary
 import org.dolphinemu.dolphinemu.activities.EmulationActivity
 import org.dolphinemu.dolphinemu.databinding.FragmentEmulationBinding
-import org.dolphinemu.dolphinemu.features.netplay.NetplayManager
 import org.dolphinemu.dolphinemu.features.settings.model.BooleanSetting
 import org.dolphinemu.dolphinemu.features.settings.model.Settings
 import org.dolphinemu.dolphinemu.overlay.InputOverlay
@@ -64,7 +57,9 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
     }
 
     override fun onCreateView(
-        inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
     ): View {
         _binding = FragmentEmulationBinding.inflate(inflater, container, false)
         return binding.root
@@ -103,9 +98,8 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
 
     override fun onResume() {
         super.onResume()
-        if (NativeLibrary.IsGameMetadataValid()) {
+        if (NativeLibrary.IsGameMetadataValid())
             inputOverlay?.refreshControls()
-        }
 
         AfterDirectoryInitializationRunner().runWithLifecycle(this) {
             run(emulationActivity!!.isActivityRecreated)
@@ -132,7 +126,8 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
 
     fun toggleInputOverlayVisibility(settings: Settings?) {
         BooleanSetting.MAIN_SHOW_INPUT_OVERLAY.setBoolean(
-            settings!!, !BooleanSetting.MAIN_SHOW_INPUT_OVERLAY.boolean
+            settings!!,
+            !BooleanSetting.MAIN_SHOW_INPUT_OVERLAY.boolean
         )
 
         inputOverlay?.refreshControls()
@@ -163,11 +158,6 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
         Log.debug("[EmulationFragment] Surface destroyed.")
         NativeLibrary.SurfaceDestroyed()
         runWhenSurfaceIsValid = true
-    }
-
-    fun resetEmulation() {
-        Log.debug("[EmulationFragment] Resetting emulation.")
-        NativeLibrary.ResetEmulation()
     }
 
     fun stopEmulation() {
@@ -216,44 +206,16 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
         if (NativeLibrary.IsUninitialized()) {
             NativeLibrary.SetIsBooting()
             val emulationThread = Thread({
-                // Don't load temporary saves when launching Netplay, this path can trigger
-                // when a game starts due to orientation changes caused by a mismatch in menu
-                // vs emulation activity orientations.
-                val netplaySession = NetplayManager.activeSession
-                if (loadPreviousTemporaryState && netplaySession?.isLaunching != true) {
+                if (loadPreviousTemporaryState) {
                     Log.debug("[EmulationFragment] Starting emulation thread from previous state.")
-                    val paths = requireNotNull(gamePaths) {
-                        "Cannot start emulation without any game paths"
-                    }
-                    NativeLibrary.Run(paths, riivolution, temporaryStateFilePath, true)
+                    NativeLibrary.Run(gamePaths, riivolution, temporaryStateFilePath, true)
                 }
                 if (launchSystemMenu) {
                     Log.debug("[EmulationFragment] Starting emulation thread for the Wii Menu.")
                     NativeLibrary.RunSystemMenu()
-                } else if (netplaySession?.isLaunching == true) {
-                    Log.debug("[EmulationFragment] Starting emulation thread for Netplay.")
-                    val paths = requireNotNull(gamePaths) {
-                        "Cannot start emulation without any game paths"
-                    }
-                    lifecycleScope.launch {
-                        netplaySession.stopGame.first()
-                        stopEmulation()
-                    }
-                    netplaySession
-                        .desyncMessages
-                        .onEach { Toast.makeText(requireContext(), it.message(requireContext()), Toast.LENGTH_SHORT).show() }
-                        .launchIn(lifecycleScope)
-                    NativeLibrary.RunNetPlay(
-                        paths,
-                        riivolution,
-                        netplaySession.consumeBootSessionData()
-                    )
                 } else {
                     Log.debug("[EmulationFragment] Starting emulation thread.")
-                    val paths = requireNotNull(gamePaths) {
-                        "Cannot start emulation without any game paths"
-                    }
-                    NativeLibrary.Run(paths, riivolution)
+                    NativeLibrary.Run(gamePaths, riivolution)
                 }
                 EmulationActivity.stopIgnoringLaunchRequests()
             }, "NativeEmulation")
@@ -266,7 +228,7 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
         }
     }
 
-    fun saveTemporaryState() = NativeLibrary.SaveStateAs(temporaryStateFilePath)
+    fun saveTemporaryState() = NativeLibrary.SaveStateAs(temporaryStateFilePath, true)
 
     private val temporaryStateFilePath: String
         get() = "${requireContext().filesDir}${File.separator}temp.sav"
@@ -277,7 +239,9 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
         private const val KEY_SYSTEM_MENU = "systemMenu"
 
         fun newInstance(
-            gamePaths: Array<String>?, riivolution: Boolean, systemMenu: Boolean
+            gamePaths: Array<String>?,
+            riivolution: Boolean,
+            systemMenu: Boolean
         ): EmulationFragment {
             val args = Bundle()
             args.apply {

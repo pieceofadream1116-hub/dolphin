@@ -4,6 +4,7 @@
 #include "Core/PowerPC/Jit64Common/EmuCodeBlock.h"
 
 #include <functional>
+#include <limits>
 
 #include "Common/Assert.h"
 #include "Common/CPUDetect.h"
@@ -89,13 +90,6 @@ void EmuCodeBlock::SwitchToNearCode()
 {
   m_far_code.SetCodePtr(GetWritableCodePtr(), GetWritableCodeEnd(), HasWriteFailed());
   SetCodePtr(m_near_code, m_near_code_end, m_near_code_write_failed);
-}
-
-void EmuCodeBlock::FlushPCBeforeSlowAccess()
-{
-  // PC is used by memory watchpoints (if enabled), profiling where to insert gather pipe
-  // interrupt checks, and printing accurate PC locations in debug logs.
-  MOV(32, PPCSTATE(pc), Imm32(m_jit.js.compilerPC));
 }
 
 FixupBranch EmuCodeBlock::BATAddressLookup(X64Reg addr, X64Reg tmp, const void* bat_table)
@@ -336,31 +330,27 @@ void EmuCodeBlock::SafeLoadToReg(X64Reg reg_value, const Gen::OpArg& opAddress, 
     MovInfo mov;
     bool offsetAddedToAddress =
         UnsafeLoadToReg(reg_value, opAddress, accessSize, offset, signExtend, &mov);
-
+    TrampolineInfo& info = m_back_patch_info[mov.address];
+    info.pc = js.compilerPC;
+    info.nonAtomicSwapStoreSrc = mov.nonAtomicSwapStore ? mov.nonAtomicSwapStoreSrc : INVALID_REG;
+    info.start = backpatchStart;
+    info.read = true;
+    info.op_reg = reg_value;
+    info.op_arg = opAddress;
+    info.offsetAddedToAddress = offsetAddedToAddress;
+    info.accessSize = accessSize >> 3;
+    info.offset = offset;
+    info.registersInUse = registersInUse;
+    info.flags = flags;
+    info.signExtend = signExtend;
     ptrdiff_t padding = BACKPATCH_SIZE - (GetCodePtr() - backpatchStart);
     if (padding > 0)
     {
       NOP(padding);
     }
+    info.len = static_cast<u32>(GetCodePtr() - info.start);
 
-    TrampolineInfo& info = m_back_patch_info_temp.emplace_back();
-    info = {
-        .start = backpatchStart,
-        .len = static_cast<u16>(GetCodePtr() - backpatchStart),
-        .flags = static_cast<u8>(flags),
-        .accessSize = static_cast<u8>(accessSize >> 3),
-        .read = true,
-        .signExtend = signExtend,
-        .offsetAddedToAddress = offsetAddedToAddress,
-        .pc = js.compilerPC,
-        .registersInUse = registersInUse,
-        .nonAtomicSwapStoreSrc = mov.nonAtomicSwapStore ? mov.nonAtomicSwapStoreSrc : INVALID_REG,
-        .offset = offset,
-        .op_reg = reg_value,
-        .op_arg = opAddress,
-    };
-
-    js.fastmemLoadStore = true;
+    js.fastmemLoadStore = mov.address;
     return;
   }
 
@@ -396,11 +386,14 @@ void EmuCodeBlock::SafeLoadToReg(X64Reg reg_value, const Gen::OpArg& opAddress, 
     SetJumpTarget(slow);
   }
 
-  // In the case of Jit64AsmCommon routines, the state we want to store here isn't known
-  // when compiling the routine, so the caller has to store it themselves.
+  // PC is used by memory watchpoints (if enabled), profiling where to insert gather pipe
+  // interrupt checks, and printing accurate PC locations in debug logs.
+  //
+  // In the case of Jit64AsmCommon routines, we don't know the PC here,
+  // so the caller has to store the PC themselves.
   if (!(flags & SAFE_LOADSTORE_NO_UPDATE_PC))
   {
-    FlushPCBeforeSlowAccess();
+    MOV(32, PPCSTATE(pc), Imm32(js.compilerPC));
   }
 
   size_t rsp_alignment = (flags & SAFE_LOADSTORE_NO_PROLOG) ? 8 : 0;
@@ -408,16 +401,16 @@ void EmuCodeBlock::SafeLoadToReg(X64Reg reg_value, const Gen::OpArg& opAddress, 
   switch (accessSize)
   {
   case 64:
-    ABI_CallFunctionPR(PowerPC::ReadFromJit<u64>, &m_jit.m_mmu, reg_addr);
+    ABI_CallFunctionPR(PowerPC::ReadU64FromJit, &m_jit.m_mmu, reg_addr);
     break;
   case 32:
-    ABI_CallFunctionPR(PowerPC::ReadFromJit<u32>, &m_jit.m_mmu, reg_addr);
+    ABI_CallFunctionPR(PowerPC::ReadU32FromJit, &m_jit.m_mmu, reg_addr);
     break;
   case 16:
-    ABI_CallFunctionPR(PowerPC::ReadFromJit<u16>, &m_jit.m_mmu, reg_addr);
+    ABI_CallFunctionPR(PowerPC::ReadU16FromJit, &m_jit.m_mmu, reg_addr);
     break;
   case 8:
-    ABI_CallFunctionPR(PowerPC::ReadFromJit<u8>, &m_jit.m_mmu, reg_addr);
+    ABI_CallFunctionPR(PowerPC::ReadU8FromJit, &m_jit.m_mmu, reg_addr);
     break;
   }
   ABI_PopRegistersAndAdjustStack(registersInUse, rsp_alignment);
@@ -464,23 +457,24 @@ void EmuCodeBlock::SafeLoadToRegImmediate(X64Reg reg_value, u32 address, int acc
     return;
   }
 
-  FlushPCBeforeSlowAccess();
+  // Helps external systems know which instruction triggered the read.
+  MOV(32, PPCSTATE(pc), Imm32(m_jit.js.compilerPC));
 
   // Fall back to general-case code.
   ABI_PushRegistersAndAdjustStack(registersInUse, 0);
   switch (accessSize)
   {
   case 64:
-    ABI_CallFunctionPC(PowerPC::ReadFromJit<u64>, &m_jit.m_mmu, address);
+    ABI_CallFunctionPC(PowerPC::ReadU64FromJit, &m_jit.m_mmu, address);
     break;
   case 32:
-    ABI_CallFunctionPC(PowerPC::ReadFromJit<u32>, &m_jit.m_mmu, address);
+    ABI_CallFunctionPC(PowerPC::ReadU32FromJit, &m_jit.m_mmu, address);
     break;
   case 16:
-    ABI_CallFunctionPC(PowerPC::ReadFromJit<u16>, &m_jit.m_mmu, address);
+    ABI_CallFunctionPC(PowerPC::ReadU16FromJit, &m_jit.m_mmu, address);
     break;
   case 8:
-    ABI_CallFunctionPC(PowerPC::ReadFromJit<u8>, &m_jit.m_mmu, address);
+    ABI_CallFunctionPC(PowerPC::ReadU8FromJit, &m_jit.m_mmu, address);
     break;
   }
   ABI_PopRegistersAndAdjustStack(registersInUse, 0);
@@ -513,30 +507,26 @@ void EmuCodeBlock::SafeWriteRegToReg(OpArg reg_value, X64Reg reg_addr, int acces
     u8* backpatchStart = GetWritableCodePtr();
     MovInfo mov;
     UnsafeWriteRegToReg(reg_value, reg_addr, accessSize, offset, swap, &mov);
-
-    const ptrdiff_t padding = BACKPATCH_SIZE - (GetCodePtr() - backpatchStart);
+    TrampolineInfo& info = m_back_patch_info[mov.address];
+    info.pc = js.compilerPC;
+    info.nonAtomicSwapStoreSrc = mov.nonAtomicSwapStore ? mov.nonAtomicSwapStoreSrc : INVALID_REG;
+    info.start = backpatchStart;
+    info.read = false;
+    info.op_arg = reg_value;
+    info.op_reg = reg_addr;
+    info.offsetAddedToAddress = false;
+    info.accessSize = accessSize >> 3;
+    info.offset = offset;
+    info.registersInUse = registersInUse;
+    info.flags = flags;
+    ptrdiff_t padding = BACKPATCH_SIZE - (GetCodePtr() - backpatchStart);
     if (padding > 0)
     {
       NOP(padding);
     }
+    info.len = static_cast<u32>(GetCodePtr() - info.start);
 
-    TrampolineInfo& info = m_back_patch_info_temp.emplace_back();
-    info = {
-        .start = backpatchStart,
-        .len = static_cast<u16>(GetCodePtr() - backpatchStart),
-        .flags = static_cast<u8>(flags),
-        .accessSize = static_cast<u8>(accessSize >> 3),
-        .read = false,
-        .offsetAddedToAddress = false,
-        .pc = js.compilerPC,
-        .registersInUse = registersInUse,
-        .nonAtomicSwapStoreSrc = mov.nonAtomicSwapStore ? mov.nonAtomicSwapStoreSrc : INVALID_REG,
-        .offset = offset,
-        .op_reg = reg_addr,
-        .op_arg = reg_value,
-    };
-
-    js.fastmemLoadStore = true;
+    js.fastmemLoadStore = mov.address;
 
     return;
   }
@@ -570,11 +560,14 @@ void EmuCodeBlock::SafeWriteRegToReg(OpArg reg_value, X64Reg reg_addr, int acces
     SetJumpTarget(slow);
   }
 
-  // In the case of Jit64AsmCommon routines, the state we want to store here isn't known
-  // when compiling the routine, so the caller has to store it themselves.
+  // PC is used by memory watchpoints (if enabled), profiling where to insert gather pipe
+  // interrupt checks, and printing accurate PC locations in debug logs.
+  //
+  // In the case of Jit64AsmCommon routines, we don't know the PC here,
+  // so the caller has to store the PC themselves.
   if (!(flags & SAFE_LOADSTORE_NO_UPDATE_PC))
   {
-    FlushPCBeforeSlowAccess();
+    MOV(32, PPCSTATE(pc), Imm32(js.compilerPC));
   }
 
   size_t rsp_alignment = (flags & SAFE_LOADSTORE_NO_PROLOG) ? 8 : 0;
@@ -595,19 +588,19 @@ void EmuCodeBlock::SafeWriteRegToReg(OpArg reg_value, X64Reg reg_addr, int acces
   switch (accessSize)
   {
   case 64:
-    ABI_CallFunctionPRR(swap ? PowerPC::WriteFromJit<u64> : PowerPC::WriteU64SwapFromJit,
+    ABI_CallFunctionPRR(swap ? PowerPC::WriteU64FromJit : PowerPC::WriteU64SwapFromJit,
                         &m_jit.m_mmu, reg, reg_addr);
     break;
   case 32:
-    ABI_CallFunctionPRR(swap ? PowerPC::WriteFromJit<u32> : PowerPC::WriteU32SwapFromJit,
+    ABI_CallFunctionPRR(swap ? PowerPC::WriteU32FromJit : PowerPC::WriteU32SwapFromJit,
                         &m_jit.m_mmu, reg, reg_addr);
     break;
   case 16:
-    ABI_CallFunctionPRR(swap ? PowerPC::WriteFromJit<u16> : PowerPC::WriteU16SwapFromJit,
+    ABI_CallFunctionPRR(swap ? PowerPC::WriteU16FromJit : PowerPC::WriteU16SwapFromJit,
                         &m_jit.m_mmu, reg, reg_addr);
     break;
   case 8:
-    ABI_CallFunctionPRR(PowerPC::WriteFromJit<u8>, &m_jit.m_mmu, reg, reg_addr);
+    ABI_CallFunctionPRR(PowerPC::WriteU8FromJit, &m_jit.m_mmu, reg, reg_addr);
     break;
   }
   ABI_PopRegistersAndAdjustStack(registersInUse, rsp_alignment);
@@ -670,22 +663,23 @@ bool EmuCodeBlock::WriteToConstAddress(int accessSize, OpArg arg, u32 address,
   }
   else
   {
-    FlushPCBeforeSlowAccess();
+    // Helps external systems know which instruction triggered the write
+    MOV(32, PPCSTATE(pc), Imm32(m_jit.js.compilerPC));
 
     ABI_PushRegistersAndAdjustStack(registersInUse, 0);
     switch (accessSize)
     {
     case 64:
-      ABI_CallFunctionPAC(64, PowerPC::WriteFromJit<u64>, &m_jit.m_mmu, arg, address);
+      ABI_CallFunctionPAC(64, PowerPC::WriteU64FromJit, &m_jit.m_mmu, arg, address);
       break;
     case 32:
-      ABI_CallFunctionPAC(32, PowerPC::WriteFromJit<u32>, &m_jit.m_mmu, arg, address);
+      ABI_CallFunctionPAC(32, PowerPC::WriteU32FromJit, &m_jit.m_mmu, arg, address);
       break;
     case 16:
-      ABI_CallFunctionPAC(16, PowerPC::WriteFromJit<u16>, &m_jit.m_mmu, arg, address);
+      ABI_CallFunctionPAC(16, PowerPC::WriteU16FromJit, &m_jit.m_mmu, arg, address);
       break;
     case 8:
-      ABI_CallFunctionPAC(8, PowerPC::WriteFromJit<u8>, &m_jit.m_mmu, arg, address);
+      ABI_CallFunctionPAC(8, PowerPC::WriteU8FromJit, &m_jit.m_mmu, arg, address);
       break;
     }
     ABI_PopRegistersAndAdjustStack(registersInUse, 0);
@@ -748,8 +742,7 @@ void EmuCodeBlock::JitClearCA()
 // Abstract between AVX and SSE: automatically handle 3-operand instructions
 void EmuCodeBlock::avx_op(void (XEmitter::*avxOp)(X64Reg, X64Reg, const OpArg&),
                           void (XEmitter::*sseOp)(X64Reg, const OpArg&), X64Reg regOp,
-                          const OpArg& arg1, const OpArg& arg2, bool packed, bool reversible,
-                          X64Reg scratch)
+                          const OpArg& arg1, const OpArg& arg2, bool packed, bool reversible)
 {
   if (arg1.IsSimpleReg(regOp))
   {
@@ -786,19 +779,19 @@ void EmuCodeBlock::avx_op(void (XEmitter::*avxOp)(X64Reg, X64Reg, const OpArg&),
   else
   {
     // The ugly case: Not reversible, and we have regOp == arg2 without AVX or with arg1 == memory
-    if (!arg1.IsSimpleReg(scratch))
-      MOVAPD(scratch, arg1);
+    if (!arg1.IsSimpleReg(XMM0))
+      MOVAPD(XMM0, arg1);
     if (cpu_info.bAVX)
     {
-      (this->*avxOp)(regOp, scratch, arg2);
+      (this->*avxOp)(regOp, XMM0, arg2);
     }
     else
     {
-      (this->*sseOp)(scratch, arg2);
+      (this->*sseOp)(XMM0, arg2);
       if (packed)
-        MOVAPD(regOp, R(scratch));
+        MOVAPD(regOp, R(XMM0));
       else
-        MOVSD(regOp, R(scratch));
+        MOVSD(regOp, R(XMM0));
     }
   }
 }
@@ -806,7 +799,7 @@ void EmuCodeBlock::avx_op(void (XEmitter::*avxOp)(X64Reg, X64Reg, const OpArg&),
 // Abstract between AVX and SSE: automatically handle 3-operand instructions
 void EmuCodeBlock::avx_op(void (XEmitter::*avxOp)(X64Reg, X64Reg, const OpArg&, u8),
                           void (XEmitter::*sseOp)(X64Reg, const OpArg&, u8), X64Reg regOp,
-                          const OpArg& arg1, const OpArg& arg2, u8 imm, X64Reg scratch)
+                          const OpArg& arg1, const OpArg& arg2, u8 imm)
 {
   if (arg1.IsSimpleReg(regOp))
   {
@@ -824,37 +817,18 @@ void EmuCodeBlock::avx_op(void (XEmitter::*avxOp)(X64Reg, X64Reg, const OpArg&, 
   else
   {
     // The ugly case: regOp == arg2 without AVX, or with arg1 == memory
-    if (!arg1.IsSimpleReg(scratch))
-      MOVAPD(scratch, arg1);
+    if (!arg1.IsSimpleReg(XMM0))
+      MOVAPD(XMM0, arg1);
     if (cpu_info.bAVX)
     {
-      (this->*avxOp)(regOp, scratch, arg2, imm);
+      (this->*avxOp)(regOp, XMM0, arg2, imm);
     }
     else
     {
-      (this->*sseOp)(scratch, arg2, imm);
-      if (regOp != scratch)
-        MOVAPD(regOp, R(scratch));
+      (this->*sseOp)(XMM0, arg2, imm);
+      if (regOp != XMM0)
+        MOVAPD(regOp, R(XMM0));
     }
-  }
-}
-
-// Abstract between AVX and SSE: automatically handle 3-operand instructions
-void EmuCodeBlock::avx_op(void (XEmitter::*avxOp)(X64Reg, X64Reg, u8),
-                          void (XEmitter::*sseOp)(X64Reg, u8), X64Reg regOp1, X64Reg regOp2, u8 imm)
-{
-  if (regOp1 == regOp2)
-  {
-    (this->*sseOp)(regOp1, imm);
-  }
-  else if (cpu_info.bAVX)
-  {
-    (this->*avxOp)(regOp1, regOp2, imm);
-  }
-  else
-  {
-    MOVAPD(regOp1, R(regOp2));
-    (this->*sseOp)(regOp1, imm);
   }
 }
 
@@ -869,9 +843,8 @@ void EmuCodeBlock::Force25BitPrecision(X64Reg output, const OpArg& input, X64Reg
 {
   if (m_jit.jo.accurateSinglePrecision)
   {
-    DEBUG_ASSERT(output != tmp);
     // mantissa = (mantissa & ~0xFFFFFFF) + ((mantissa & (1ULL << 27)) << 1);
-    if (input.IsSimpleReg() && !input.IsSimpleReg(tmp) && cpu_info.bAVX)
+    if (input.IsSimpleReg() && cpu_info.bAVX)
     {
       VPAND(tmp, input.GetSimpleReg(), MConst(psRoundBit));
       VPAND(output, input.GetSimpleReg(), MConst(psMantissaTruncate));
@@ -1069,4 +1042,5 @@ void EmuCodeBlock::SetFPRF(Gen::X64Reg xmm, bool single)
 void EmuCodeBlock::Clear()
 {
   m_back_patch_info.clear();
+  m_exception_handler_at_loc.clear();
 }

@@ -3,17 +3,20 @@
 
 #include "Core/PowerPC/JitInterface.h"
 
+#include <algorithm>
 #include <string>
 #include <unordered_set>
+
+#include <fmt/format.h>
 
 #include "Common/Assert.h"
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
+#include "Common/MsgHandler.h"
 
 #include "Core/Core.h"
 #include "Core/PowerPC/CPUCoreBase.h"
 #include "Core/PowerPC/CachedInterpreter/CachedInterpreter.h"
-#include "Core/PowerPC/Gekko.h"
 #include "Core/PowerPC/JitCommon/JitBase.h"
 #include "Core/PowerPC/MMU.h"
 #include "Core/PowerPC/PPCSymbolDB.h"
@@ -69,8 +72,7 @@ CPUCoreBase* JitInterface::InitJitCore(PowerPC::CPUCore core)
     m_jit.reset();
     return nullptr;
   }
-  if (!m_jit->Init())
-    m_jit.reset();
+  m_jit->Init();
   return m_jit.get();
 }
 
@@ -78,16 +80,6 @@ CPUCoreBase* JitInterface::GetCore() const
 {
   return m_jit.get();
 }
-
-#ifndef _ARCH_32
-bool JitInterface::WantsPageTableMappings() const
-{
-  if (!m_jit)
-    return false;
-
-  return m_jit->WantsPageTableMappings();
-}
-#endif
 
 void JitInterface::UpdateMembase()
 {
@@ -197,10 +189,10 @@ void JitInterface::WipeBlockProfilingData(const Core::CPUThreadGuard& guard)
 }
 
 void JitInterface::RunOnBlocks(const Core::CPUThreadGuard& guard,
-                               const std::function<void(const JitBlock&)>& f) const
+                               std::function<void(const JitBlock&)> f) const
 {
   if (m_jit)
-    m_jit->GetBlockCache()->RunOnBlocks(guard, f);
+    m_jit->GetBlockCache()->RunOnBlocks(guard, std::move(f));
 }
 
 std::size_t JitInterface::GetBlockCount() const
@@ -313,7 +305,7 @@ void JitInterface::CompileExceptionCheck(ExceptionType type)
   if (!m_jit)
     return;
 
-  Common::LazyMemoryRegionBitSet* exception_addresses = nullptr;
+  std::unordered_set<u32>* exception_addresses = nullptr;
 
   switch (type)
   {
@@ -329,7 +321,7 @@ void JitInterface::CompileExceptionCheck(ExceptionType type)
   }
 
   auto& ppc_state = m_system.GetPPCState();
-  if (ppc_state.pc != 0 && !exception_addresses->TestBit(ppc_state.pc / sizeof(UGeckoInstruction)))
+  if (ppc_state.pc != 0 && !exception_addresses->contains(ppc_state.pc))
   {
     if (type == ExceptionType::FIFOWrite)
     {
@@ -338,16 +330,15 @@ void JitInterface::CompileExceptionCheck(ExceptionType type)
 
       // Check in case the code has been replaced since: do we need to do this?
       const OpType optype =
-          PPCTables::GetOpInfo(PowerPC::MMU::HostRead<u32>(guard, ppc_state.pc), ppc_state.pc)
-              ->type;
+          PPCTables::GetOpInfo(PowerPC::MMU::HostRead_U32(guard, ppc_state.pc), ppc_state.pc)->type;
       if (optype != OpType::Store && optype != OpType::StoreFP && optype != OpType::StorePS)
         return;
     }
-    exception_addresses->SetBit(ppc_state.pc / sizeof(UGeckoInstruction));
+    exception_addresses->insert(ppc_state.pc);
 
     // Invalidate the JIT block so that it gets recompiled with the external exception check
     // included.
-    m_jit->GetBlockCache()->InvalidateICache(ppc_state.pc, sizeof(UGeckoInstruction), true);
+    m_jit->GetBlockCache()->InvalidateICache(ppc_state.pc, 4, true);
   }
 }
 

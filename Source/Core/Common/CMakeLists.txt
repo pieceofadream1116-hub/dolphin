@@ -47,21 +47,18 @@ add_library(common
   Crypto/HMAC.h
   Crypto/SHA1.cpp
   Crypto/SHA1.h
-  CWDemangler.cpp
-  CWDemangler.h
   Debug/MemoryPatches.cpp
   Debug/MemoryPatches.h
   Debug/Threads.h
   Debug/Watches.cpp
   Debug/Watches.h
-  DirectIOFile.cpp
-  DirectIOFile.h
   DynamicLibrary.cpp
   DynamicLibrary.h
   ENet.cpp
   ENet.h
   EnumFormatter.h
   EnumMap.h
+  EnumUtils.h
   Event.h
   FatFsUtil.cpp
   FatFsUtil.h
@@ -99,12 +96,7 @@ add_library(common
   JsonUtil.h
   JsonUtil.cpp
   Lazy.h
-  LazyMemoryRegionBitSet.cpp
-  LazyMemoryRegionBitSet.h
   LinearDiskCache.h
-  UnixUtil.h
-  LocaleUtil.cpp
-  LocaleUtil.h
   Logging/ConsoleListener.h
   Logging/Log.h
   Logging/LogManager.cpp
@@ -118,12 +110,10 @@ add_library(common
   MinizipUtil.h
   MsgHandler.cpp
   MsgHandler.h
-  Mutex.h
   NandPaths.cpp
   NandPaths.h
   Network.cpp
   Network.h
-  OneShotEvent.h
   PcapFile.cpp
   PcapFile.h
   Profiler.cpp
@@ -133,11 +123,11 @@ add_library(common
   QoSSession.h
   Random.cpp
   Random.h
-  RangeSet.h
-  RangeSizeSet.h
+  Result.h
   ScopeGuard.h
   SDCardUtil.cpp
   SDCardUtil.h
+  Semaphore.h
   SettingsHandler.cpp
   SettingsHandler.h
   SFMLHelper.cpp
@@ -147,6 +137,7 @@ add_library(common
   SocketContext.h
   SpanUtils.h
   SPSCQueue.h
+  StringLiteral.h
   StringUtil.cpp
   StringUtil.h
   SymbolDB.cpp
@@ -157,11 +148,11 @@ add_library(common
   Timer.h
   TimeUtil.cpp
   TimeUtil.h
-  TransferableSharedMutex.h
   TraversalClient.cpp
   TraversalClient.h
   TraversalProto.h
   TypeUtils.h
+  Unreachable.h
   UPnP.cpp
   UPnP.h
   VariantUtil.h
@@ -187,12 +178,13 @@ PUBLIC
   enet::enet
   fmt::fmt
   MbedTLS::mbedtls
-  MINIZIP::minizip-ng
+  minizip-ng::minizip-ng
   sfml-network
 
 PRIVATE
   CURL::libcurl
   FatFs
+  Iconv::Iconv
   spng::spng
   watcher
   ${VTUNE_LIBRARIES}
@@ -208,7 +200,6 @@ if (APPLE)
   PRIVATE
     ${APPKIT_LIBRARY}
     ${COREFOUNDATION_LIBRARY}
-    ${FOUNDATION_LIBRARY}
     ${IOK_LIBRARY}
   )
 elseif(WIN32)
@@ -232,6 +223,8 @@ endif()
 
 if(ANDROID)
   target_sources(common PRIVATE
+    AndroidAnalytics.cpp
+    AndroidAnalytics.h
     Logging/ConsoleListenerDroid.cpp
     MemArenaAndroid.cpp
   )
@@ -244,7 +237,6 @@ elseif(WIN32)
   )
 elseif(APPLE)
   target_sources(common PRIVATE
-    CommonFuncsObjC.mm
     Logging/ConsoleListenerNix.cpp
     MemArenaDarwin.cpp
   )
@@ -335,7 +327,13 @@ elseif(ENABLE_X11 AND X11_FOUND)
   target_sources(common PRIVATE
     GL/GLX11Window.cpp
     GL/GLX11Window.h
+    GL/GLInterface/GLX.cpp
+    GL/GLInterface/GLX.h
   )
+
+  # GLX has a hard dependency on libGL.
+  # Make sure to link to it if using GLX.
+  target_link_libraries(common PUBLIC ${OPENGL_LIBRARIES})
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -344,12 +342,14 @@ endif()
 
 if(WIN32)
   target_sources(common PRIVATE HRWrap.h HRWrap.cpp)
-else()
-  target_link_libraries(common PRIVATE Iconv::Iconv)
 endif()
 
 if(USE_UPNP)
   target_link_libraries(common PRIVATE Miniupnpc::miniupnpc)
+endif()
+
+if(OPROFILE_FOUND)
+  target_link_libraries(common PRIVATE OProfile::OProfile)
 endif()
 
 if(ENABLE_LLVM)
@@ -390,7 +390,7 @@ elseif(WIN32)
     )
   configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/build_info.txt.in"
-    "${CMAKE_BINARY_DIR}/build_info.txt"
+    "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/build_info.txt"
     )
 
   target_link_libraries(common PRIVATE "-INCLUDE:enableCompatPatches")

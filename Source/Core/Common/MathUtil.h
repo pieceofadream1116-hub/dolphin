@@ -6,20 +6,15 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
-#include <concepts>
 #include <limits>
-#include <numbers>
 #include <type_traits>
-#include <utility>
 
-#include "Common/Assert.h"
 #include "Common/CommonTypes.h"
 
 namespace MathUtil
 {
-template <std::floating_point T>
-constexpr T TAU_v = std::numbers::pi_v<T> * 2;
-constexpr double TAU = TAU_v<double>;
+constexpr double TAU = 6.2831853071795865;
+constexpr double PI = TAU / 2;
 constexpr double GRAVITY_ACCELERATION = 9.80665;
 
 template <typename T>
@@ -28,46 +23,71 @@ constexpr auto Sign(const T& val) -> decltype((T{} < val) - (val < T{}))
   return (T{} < val) - (val < T{});
 }
 
+template <typename T, typename F>
+constexpr auto Lerp(const T& x, const T& y, const F& a) -> decltype(x + (y - x) * a)
+{
+  return x + (y - x) * a;
+}
+
 // Casts the specified value to a Dest. The value will be clamped to fit in the destination type.
 // Warning: The result of SaturatingCast(NaN) is undefined.
-template <std::integral Dest, typename T>
+template <typename Dest, typename T>
 constexpr Dest SaturatingCast(T value)
 {
-  constexpr Dest lo = std::numeric_limits<Dest>::min();
+  static_assert(std::is_integral<Dest>());
+
+  [[maybe_unused]] constexpr Dest lo = std::numeric_limits<Dest>::lowest();
   constexpr Dest hi = std::numeric_limits<Dest>::max();
 
-  if constexpr (std::is_integral_v<T>)
+  // T being a signed integer and Dest unsigned is a problematic case because the value will
+  // be converted into an unsigned integer, and u32(...) < 0 is always false.
+  if constexpr (std::is_integral<T>() && std::is_signed<T>() && std::is_unsigned<Dest>())
   {
-    if (std::cmp_less(value, lo))
+    static_assert(lo == 0);
+    if (value < 0)
       return lo;
-    if (std::cmp_greater(value, hi))
+    // Now that we got rid of negative values, we can safely cast value to an unsigned T
+    // since unsigned T can represent any positive value signed T could represent.
+    // The compiler will then promote the LHS or the RHS if necessary.
+    if (std::make_unsigned_t<T>(value) > hi)
+      return hi;
+  }
+  else if constexpr (std::is_integral<T>() && std::is_unsigned<T>() && std::is_signed<Dest>())
+  {
+    // value and hi will never be negative, and hi is representable as an unsigned Dest.
+    if (value > std::make_unsigned_t<Dest>(hi))
       return hi;
   }
   else
   {
-    if (value < static_cast<T>(lo))
+    // Do not use std::clamp or a similar function here to avoid overflow.
+    // For example, if Dest = s64 and T = int, we want integer promotion to convert value to a s64
+    // instead of changing lo or hi into an int.
+    if (value < lo)
       return lo;
-    if (value >= static_cast<T>(hi))
+    if (value > hi)
       return hi;
   }
   return static_cast<Dest>(value);
 }
 
-template <std::integral T>
+template <typename T>
 constexpr bool IsPow2(T imm)
 {
-  if constexpr (std::is_signed_v<T>)
-  {
-    if (imm <= 0)
-      return false;
-  }
-
-  return std::has_single_bit(static_cast<std::make_unsigned_t<T>>(imm));
+  return imm > 0 && (imm & (imm - 1)) == 0;
 }
 
 constexpr u32 NextPowerOf2(u32 value)
 {
-  return std::bit_ceil(value);
+  --value;
+  value |= value >> 1;
+  value |= value >> 2;
+  value |= value >> 4;
+  value |= value >> 8;
+  value |= value >> 16;
+  ++value;
+
+  return value;
 }
 
 template <class T>
@@ -129,19 +149,9 @@ public:
   constexpr void Clear() { *this = {}; }
 
   constexpr void Push(T x) { m_mean = m_mean + (x - m_mean) / ++m_count; }
-  constexpr void Pop(T x)
-  {
-    if (m_count <= 1)
-    {
-      Clear();
-      return;
-    }
-    m_mean = m_mean - (x - m_mean) / --m_count;
-  }
 
   constexpr size_t Count() const { return m_count; }
   constexpr T Mean() const { return m_mean; }
-  constexpr T Total() const { return m_mean * m_count; }
 
 private:
   size_t m_count = 0;
@@ -160,22 +170,9 @@ public:
     m_running_mean.Push(x);
     m_variance += (x - old_mean) * (x - m_running_mean.Mean());
   }
-  constexpr void Pop(T x)
-  {
-    if (m_running_mean.Count() <= 1)
-    {
-      Clear();
-      return;
-    }
-
-    const T old_mean = m_running_mean.Mean();
-    m_running_mean.Pop(x);
-    m_variance -= (x - old_mean) * (x - m_running_mean.Mean());
-  }
 
   constexpr size_t Count() const { return m_running_mean.Count(); }
   constexpr T Mean() const { return m_running_mean.Mean(); }
-  constexpr T Total() const { return m_running_mean.Total(); }
 
   constexpr T Variance() const { return m_variance / (Count() - 1); }
   T StandardDeviation() const { return std::sqrt(Variance()); }
@@ -191,20 +188,6 @@ private:
 // Rounds down. 0 -> undefined
 constexpr int IntLog2(u64 val)
 {
-  DEBUG_ASSERT(val != 0);
-  return std::bit_width(val) - 1;
+  return 63 - std::countl_zero(val);
 }
-
-template <std::floating_point T>
-constexpr T DegreesToRadians(T degrees)
-{
-  return degrees * std::numbers::pi_v<T> / T(180);
-}
-
-template <std::floating_point T>
-constexpr T RadiansToDegrees(T radians)
-{
-  return radians / std::numbers::pi_v<T> * T(180);
-}
-
 }  // namespace MathUtil

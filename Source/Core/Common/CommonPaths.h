@@ -41,13 +41,11 @@
 #define USA_DIR "USA"
 #define JAP_DIR "JAP"
 #define JPN_DIR "JPN"
-#define DEV_DIR "DEV"
 
 // Subdirs in the User dir returned by GetUserPath(D_USER_IDX)
 #define GC_USER_DIR "GC"
 #define GBA_USER_DIR "GBA"
 #define WII_USER_DIR "Wii"
-#define TRI_USER_DIR "Triforce"
 #define CONFIG_DIR "Config"
 #define GAMESETTINGS_DIR "GameSettings"
 #define MAPS_DIR "Maps"
@@ -72,12 +70,14 @@
 #define DUMP_DEBUG_BRANCHWATCH_DIR "BranchWatch"
 #define DUMP_DEBUG_JITBLOCKS_DIR "JitBlocks"
 #define LOGS_DIR "Logs"
+#define MAIL_LOGS_DIR "Mail"
 #define SHADERS_DIR "Shaders"
 #define WII_SYSCONF_DIR "shared2" DIR_SEP "sys"
 #define WII_WC24CONF_DIR "shared2" DIR_SEP "wc24"
 #define RESOURCES_DIR "Resources"
 #define THEMES_DIR "Themes"
 #define STYLES_DIR "Styles"
+#define BACKGROUNDS_DIR "Backgrounds"
 #define GBASAVES_DIR "Saves"
 #define ANAGLYPH_DIR "Anaglyph"
 #define PASSIVE_DIR "Passive"
@@ -92,7 +92,6 @@
 #define WIISDSYNC_DIR "WiiSDSync"
 #define ASSEMBLY_DIR "SavedAssembly"
 #define WIIBANNERS_DIR "WiiBanners"
-#define SOUNDS_DIR "Sounds"
 
 // This one is only used to remove it if it was present
 #define SHADERCACHE_LEGACY_DIR "ShaderCache"
@@ -158,7 +157,6 @@
 // Subdirs in Sys
 #define GC_SYS_DIR "GC"
 #define WII_SYS_DIR "Wii"
-#define TRI_SYS_DIR "Triforce"
 
 // Subdirs in Config
 #define GRAPHICSMOD_CONFIG_DIR "GraphicMods"

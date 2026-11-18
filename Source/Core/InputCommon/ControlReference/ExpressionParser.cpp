@@ -130,11 +130,11 @@ Lexer::Lexer(std::string expr_) : expr(std::move(expr_))
   it = expr.begin();
 }
 
-Token Lexer::GetDelimitedToken(TokenType type, char delimiter)
+Token Lexer::GetDelimitedToken(TokenType type, char delimeter)
 {
-  const std::string value = FetchCharsWhile([&](char c) { return c != delimiter && c != '\n'; });
+  const std::string value = FetchCharsWhile([&](char c) { return c != delimeter && c != '\n'; });
 
-  if (it == expr.end() || *it != delimiter)
+  if (it == expr.end() || *it != delimeter)
     return Token(TOK_INVALID);
 
   ++it;
@@ -639,8 +639,7 @@ private:
 // right-hand child. Its intended use is for supporting old-style barewords expressions.
 // Note that if you have a keyboard device as default device and the expression is a single digit
 // number, this will usually resolve in a numerical key instead of a numerical value.
-// Though if this expression belongs to NumericSetting, it will likely be simplified back to a
-// value.
+// Though if this expression belongs to NumericSetting, it will likely be simplifed back to a value.
 class CoalesceExpression : public Expression
 {
 public:
@@ -956,7 +955,7 @@ private:
 
   static bool IsRTLBinaryOp(TokenType type) { return type == TOK_ASSIGN; }
 
-  static bool IsBinaryOpWithPrecedence(const Token& tok, int precedence)
+  static bool IsBinaryOpWithPrecedence(Token tok, int precedence)
   {
     if (!tok.IsBinaryOperator())
       return false;

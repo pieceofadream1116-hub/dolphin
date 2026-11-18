@@ -10,6 +10,7 @@
 #include <QIcon>
 
 #include "Core/Core.h"
+#include "Core/NetPlayProto.h"
 #include "Core/System.h"
 #include "DolphinQt/Host.h"
 #include "DolphinQt/Resources.h"
@@ -52,7 +53,7 @@ ToolBar::ToolBar(QWidget* parent) : QToolBar(parent)
           [this] { m_refresh_action->setEnabled(true); });
 
   OnEmulationStateChanged(Core::GetState(Core::System::GetInstance()));
-  OnDebugModeToggled(Config::IsDebuggingEnabled());
+  OnDebugModeToggled(Settings::Instance().IsDebugModeEnabled());
 }
 
 void ToolBar::OnEmulationStateChanged(Core::State state)

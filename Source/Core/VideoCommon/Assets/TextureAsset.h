@@ -18,9 +18,16 @@ struct TextureAndSamplerData
   static bool FromJson(const CustomAssetLibrary::AssetID& asset_id, const picojson::object& json,
                        TextureAndSamplerData* data);
   static void ToJson(picojson::object* obj, const TextureAndSamplerData& data);
-  AbstractTextureType type;
-  CustomTextureData texture_data;
-  SamplerState sampler;
+  enum class Type
+  {
+    Type_Undefined,
+    Type_Texture2D,
+    Type_TextureCube,
+    Type_Max = Type_TextureCube
+  };
+  Type m_type;
+  CustomTextureData m_texture;
+  SamplerState m_sampler;
 };
 
 class TextureAsset final : public CustomLoadableAsset<CustomTextureData>
@@ -31,13 +38,11 @@ public:
 private:
   CustomAssetLibrary::LoadInfo LoadImpl(const CustomAssetLibrary::AssetID& asset_id) override;
 };
-
-class TextureAndSamplerAsset final : public CustomLoadableAsset<TextureAndSamplerData>
-{
-public:
-  using CustomLoadableAsset::CustomLoadableAsset;
-
-private:
-  CustomAssetLibrary::LoadInfo LoadImpl(const CustomAssetLibrary::AssetID& asset_id) override;
-};
 }  // namespace VideoCommon
+
+template <>
+struct fmt::formatter<VideoCommon::TextureAndSamplerData::Type>
+    : EnumFormatter<VideoCommon::TextureAndSamplerData::Type::Type_Max>
+{
+  constexpr formatter() : EnumFormatter({"Undefined", "Texture2D", "TextureCube"}) {}
+};

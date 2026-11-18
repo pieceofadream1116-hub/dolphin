@@ -1,6 +1,6 @@
 #include "Common/WindowsRegistry.h"
 
-#include <windows.h>
+#include <Windows.h>
 #include <string>
 #include <type_traits>
 #include "Common/StringUtil.h"
@@ -45,11 +45,6 @@ bool ReadValue(std::string* value, const std::string& subkey, const std::string&
   TruncateToCString(value);
   return true;
 }
-
-// These explicit instantiations are needed to prevent linker errors when calling
-// ReadValue in WinUpdater/Platform.cpp (for u32) and ArmCPUDetect.cpp (for u64)
-template bool ReadValue(u32* value, const std::string& subkey, const std::string& name);
-template bool ReadValue(u64* value, const std::string& subkey, const std::string& name);
 
 OSVERSIONINFOW GetOSVersion()
 {

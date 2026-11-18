@@ -9,8 +9,12 @@
 
 #include "AudioCommon/AudioCommon.h"
 #include "Common/Logging/Log.h"
+#include "Common/Random.h"
+#include "Common/StringUtil.h"
+#include "Common/Timer.h"
 #include "Core/Core.h"
 #include "Core/HW/Memmap.h"
+#include "Core/IOS/USB/Emulated/Skylanders/SkylanderCrypto.h"
 #include "Core/System.h"
 
 namespace IOS::HLE::USB
@@ -640,7 +644,7 @@ std::vector<InterfaceDescriptor> SkylanderUSB::GetInterfaces(u8 config) const
   return m_interface_descriptor;
 }
 
-std::vector<EndpointDescriptor> SkylanderUSB::GetEndpoints(u8 config, u8 iface, u8 alt) const
+std::vector<EndpointDescriptor> SkylanderUSB::GetEndpoints(u8 config, u8 interface, u8 alt) const
 {
   return m_endpoint_descriptor;
 }
@@ -656,13 +660,13 @@ bool SkylanderUSB::Attach()
   return true;
 }
 
-bool SkylanderUSB::AttachAndChangeInterface(const u8 iface)
+bool SkylanderUSB::AttachAndChangeInterface(const u8 interface)
 {
   if (!Attach())
     return false;
 
-  if (iface != m_active_interface)
-    return ChangeInterface(iface) == 0;
+  if (interface != m_active_interface)
+    return ChangeInterface(interface) == 0;
 
   return true;
 }
@@ -675,15 +679,15 @@ int SkylanderUSB::CancelTransfer(const u8 endpoint)
   return IPC_SUCCESS;
 }
 
-int SkylanderUSB::ChangeInterface(const u8 iface)
+int SkylanderUSB::ChangeInterface(const u8 interface)
 {
   DEBUG_LOG_FMT(IOS_USB, "[{:04x}:{:04x} {}] Changing interface to {}", m_vid, m_pid,
-                m_active_interface, iface);
-  m_active_interface = iface;
+                m_active_interface, interface);
+  m_active_interface = interface;
   return 0;
 }
 
-int SkylanderUSB::GetNumberOfAltSettings(u8 iface)
+int SkylanderUSB::GetNumberOfAltSettings(u8 interface)
 {
   return 0;
 }
@@ -1037,7 +1041,7 @@ int SkylanderUSB::SubmitTransfer(std::unique_ptr<IntrMessage> cmd)
   u64 expected_time_us;
   // Audio requests are 64 bytes long, are the only Interrupt requests longer than 32 bytes,
   // echo the request as the response and respond immediately
-  if (cmd->endpoint == 2 && cmd->length > 32 && cmd->length <= 64)
+  if (cmd->length > 32 && cmd->length <= 64)
   {
     // Play audio through Portal Mixer
     // Audio is unsigned 16 bit, supplied as 64 bytes which is 32 samples
@@ -1390,7 +1394,7 @@ Type NormalizeSkylanderType(Type type)
   case Type::Trap:
   case Type::Vehicle:
   case Type::Unknown:
-    // until these get separate data logic (except unknown and item since items don't save data and
+    // until these get seperate data logic (except unknown and item since items don't save data and
     // unknown is unknown)
     return Type::Unknown;
   }

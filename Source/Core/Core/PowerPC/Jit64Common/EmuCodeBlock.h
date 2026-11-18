@@ -3,8 +3,7 @@
 
 #pragma once
 
-#include <map>
-#include <vector>
+#include <unordered_map>
 
 #include "Common/BitSet.h"
 #include "Common/CommonTypes.h"
@@ -49,8 +48,6 @@ public:
   {
     return Gen::M(m_const_pool.GetConstant(&value, sizeof(T), N, index));
   }
-
-  void FlushPCBeforeSlowAccess();
 
   // Writes upper 15 bits of physical address to addr and clobbers the lower 17 bits of addr.
   // Jumps to the returned FixupBranch if lookup fails.
@@ -114,14 +111,10 @@ public:
   void avx_op(void (Gen::XEmitter::*avxOp)(Gen::X64Reg, Gen::X64Reg, const Gen::OpArg&),
               void (Gen::XEmitter::*sseOp)(Gen::X64Reg, const Gen::OpArg&), Gen::X64Reg regOp,
               const Gen::OpArg& arg1, const Gen::OpArg& arg2, bool packed = true,
-              bool reversible = false, Gen::X64Reg scratch = Gen::XMM0);
+              bool reversible = false);
   void avx_op(void (Gen::XEmitter::*avxOp)(Gen::X64Reg, Gen::X64Reg, const Gen::OpArg&, u8),
               void (Gen::XEmitter::*sseOp)(Gen::X64Reg, const Gen::OpArg&, u8), Gen::X64Reg regOp,
-              const Gen::OpArg& arg1, const Gen::OpArg& arg2, u8 imm,
-              Gen::X64Reg scratch = Gen::XMM0);
-  void avx_op(void (Gen::XEmitter::*avxOp)(Gen::X64Reg, Gen::X64Reg, u8),
-              void (Gen::XEmitter::*sseOp)(Gen::X64Reg, u8), Gen::X64Reg regOp1, Gen::X64Reg regOp2,
-              u8 imm);
+              const Gen::OpArg& arg1, const Gen::OpArg& arg2, u8 imm);
 
   void Force25BitPrecision(Gen::X64Reg output, const Gen::OpArg& input, Gen::X64Reg tmp);
 
@@ -141,16 +134,6 @@ protected:
   u8* m_near_code_end = nullptr;
   bool m_near_code_write_failed = false;
 
-  // The keys store the entry point of a block. Lookups find the currently running block through
-  // lower_bound (which is why the comparison is std::greater), and then linearly search the vector
-  // for the specific address.
-  //
-  // Because the total number of entries is in the 100s of thousands, and std::map is inefficient,
-  // this improves performance mostly by allowing to batch insert all the info for each block. (Even
-  // a better ordered map like b-trees would probably benefit.)
-  //
-  // Note that this would have had to be an ordered structure even without this optimization (to
-  // erase the entries when a block is destroyed).
-  std::map<const u8*, std::vector<TrampolineInfo>, std::greater<const u8*>> m_back_patch_info;
-  std::vector<TrampolineInfo> m_back_patch_info_temp;
+  std::unordered_map<u8*, TrampolineInfo> m_back_patch_info;
+  std::unordered_map<u8*, u8*> m_exception_handler_at_loc;
 };

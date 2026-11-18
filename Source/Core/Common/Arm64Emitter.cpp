@@ -21,7 +21,7 @@
 #include "Common/SmallVector.h"
 
 #ifdef _WIN32
-#include <windows.h>
+#include <Windows.h>
 #endif
 #ifdef __APPLE__
 #include <libkern/OSCacheControl.h>
@@ -678,30 +678,56 @@ void ARM64XEmitter::SetJumpTarget(FixupBranch const& branch)
   if (!branch.ptr)
     return;
 
-  u32 inst = branch.instruction;
+  bool Not = false;
+  u32 inst = 0;
   s64 distance = (s64)(m_code - branch.ptr);
   distance >>= 2;
 
-  if (((inst >> 26) & 0x1F) == 0x5)
+  switch (branch.type)
   {
-    // B (unconditional), BL
-    ASSERT_MSG(DYNA_REC, IsInRangeImm26(distance),
-               "Branch instruction {:08x}: Received too large distance: {}", inst, distance);
-    inst |= MaskImm26(distance);
-  }
-  else if ((inst & (1 << 26)) != 0)
+  case FixupBranch::Type::CBNZ:
+    Not = true;
+    [[fallthrough]];
+  case FixupBranch::Type::CBZ:
   {
-    // B (conditional), CBZ, CBNZ
     ASSERT_MSG(DYNA_REC, IsInRangeImm19(distance),
-               "Branch instruction {:08x}: Received too large distance: {}", inst, distance);
-    inst |= MaskImm19(distance) << 5;
+               "Branch type {}: Received too large distance: {}", static_cast<int>(branch.type),
+               distance);
+    const bool b64Bit = Is64Bit(branch.reg);
+    inst = (b64Bit << 31) | (0x1A << 25) | (Not << 24) | (MaskImm19(distance) << 5) |
+           DecodeReg(branch.reg);
   }
-  else
+  break;
+  case FixupBranch::Type::BConditional:
+    ASSERT_MSG(DYNA_REC, IsInRangeImm19(distance),
+               "Branch type {}: Received too large distance: {}", static_cast<int>(branch.type),
+               distance);
+    inst = (0x2A << 25) | (MaskImm19(distance) << 5) | branch.cond;
+    break;
+  case FixupBranch::Type::TBNZ:
+    Not = true;
+    [[fallthrough]];
+  case FixupBranch::Type::TBZ:
   {
-    // TBZ, TBNZ
     ASSERT_MSG(DYNA_REC, IsInRangeImm14(distance),
-               "Branch instruction {:08x}: Received too large distance: {}", inst, distance);
-    inst |= MaskImm14(distance) << 5;
+               "Branch type {}: Received too large distance: {}", static_cast<int>(branch.type),
+               distance);
+    inst = ((branch.bit & 0x20) << 26) | (0x1B << 25) | (Not << 24) | ((branch.bit & 0x1F) << 19) |
+           (MaskImm14(distance) << 5) | DecodeReg(branch.reg);
+  }
+  break;
+  case FixupBranch::Type::B:
+    ASSERT_MSG(DYNA_REC, IsInRangeImm26(distance),
+               "Branch type {}: Received too large distance: {}", static_cast<int>(branch.type),
+               distance);
+    inst = (0x5 << 26) | MaskImm26(distance);
+    break;
+  case FixupBranch::Type::BL:
+    ASSERT_MSG(DYNA_REC, IsInRangeImm26(distance),
+               "Branch type {}: Received too large distance: {}", static_cast<int>(branch.type),
+               distance);
+    inst = (0x25 << 26) | MaskImm26(distance);
+    break;
   }
 
   std::memcpy(branch.ptr, &inst, sizeof(inst));
@@ -725,43 +751,50 @@ FixupBranch ARM64XEmitter::WriteFixupBranch()
 FixupBranch ARM64XEmitter::CBZ(ARM64Reg Rt)
 {
   FixupBranch branch = WriteFixupBranch();
-  branch.instruction = (Is64Bit(Rt) << 31) | (0x1A << 25) | DecodeReg(Rt);
+  branch.type = FixupBranch::Type::CBZ;
+  branch.reg = Rt;
   return branch;
 }
 FixupBranch ARM64XEmitter::CBNZ(ARM64Reg Rt)
 {
-  FixupBranch branch = CBZ(Rt);
-  branch.instruction |= 1 << 24;
+  FixupBranch branch = WriteFixupBranch();
+  branch.type = FixupBranch::Type::CBNZ;
+  branch.reg = Rt;
   return branch;
 }
 FixupBranch ARM64XEmitter::B(CCFlags cond)
 {
   FixupBranch branch = WriteFixupBranch();
-  branch.instruction = (0x2A << 25) | cond;
+  branch.type = FixupBranch::Type::BConditional;
+  branch.cond = cond;
   return branch;
 }
 FixupBranch ARM64XEmitter::TBZ(ARM64Reg Rt, u8 bit)
 {
   FixupBranch branch = WriteFixupBranch();
-  branch.instruction = ((bit & 0x20) << 26) | (0x1B << 25) | ((bit & 0x1F) << 19) | DecodeReg(Rt);
+  branch.type = FixupBranch::Type::TBZ;
+  branch.reg = Rt;
+  branch.bit = bit;
   return branch;
 }
 FixupBranch ARM64XEmitter::TBNZ(ARM64Reg Rt, u8 bit)
 {
-  FixupBranch branch = TBZ(Rt, bit);
-  branch.instruction |= 1 << 24;
+  FixupBranch branch = WriteFixupBranch();
+  branch.type = FixupBranch::Type::TBNZ;
+  branch.reg = Rt;
+  branch.bit = bit;
   return branch;
 }
 FixupBranch ARM64XEmitter::B()
 {
   FixupBranch branch = WriteFixupBranch();
-  branch.instruction = (0x5 << 26);
+  branch.type = FixupBranch::Type::B;
   return branch;
 }
 FixupBranch ARM64XEmitter::BL()
 {
   FixupBranch branch = WriteFixupBranch();
-  branch.instruction = (0x25 << 26);
+  branch.type = FixupBranch::Type::BL;
   return branch;
 }
 
@@ -1875,17 +1908,12 @@ void ARM64XEmitter::MOVI2RImpl(ARM64Reg Rd, T imm)
   {
     if constexpr (sizeof(T) == 8)
     {
-      for (u64 orr_imm : {imm, (imm << 32) | (imm & 0x0000'0000'FFFF'FFFF),
+      for (u64 orr_imm : {(imm << 32) | (imm & 0x0000'0000'FFFF'FFFF),
                           (imm & 0xFFFF'FFFF'0000'0000) | (imm >> 32),
                           (imm << 48) | (imm & 0x0000'FFFF'FFFF'0000) | (imm >> 48)})
       {
         if (LogicalImm(orr_imm, GPRSize::B64))
-        {
           try_base(orr_imm, Approach::ORRBase, false);
-
-          if (instructions_required(best_parts, best_approach) <= 1)
-            break;
-        }
       }
     }
     else
@@ -2705,19 +2733,19 @@ void ARM64FloatEmitter::LD1(u8 size, ARM64Reg Rt, u8 index, ARM64Reg Rn, ARM64Re
 
 void ARM64FloatEmitter::LD1R(u8 size, ARM64Reg Rt, ARM64Reg Rn)
 {
-  EmitLoadStoreSingleStructure(1, 0, 6, 0, MathUtil::IntLog2(size) - 3, Rt, Rn);
+  EmitLoadStoreSingleStructure(1, 0, 6, 0, size >> 4, Rt, Rn);
 }
 void ARM64FloatEmitter::LD2R(u8 size, ARM64Reg Rt, ARM64Reg Rn)
 {
-  EmitLoadStoreSingleStructure(1, 1, 6, 0, MathUtil::IntLog2(size) - 3, Rt, Rn);
+  EmitLoadStoreSingleStructure(1, 1, 6, 0, size >> 4, Rt, Rn);
 }
 void ARM64FloatEmitter::LD1R(u8 size, ARM64Reg Rt, ARM64Reg Rn, ARM64Reg Rm)
 {
-  EmitLoadStoreSingleStructure(1, 0, 6, 0, MathUtil::IntLog2(size) - 3, Rt, Rn, Rm);
+  EmitLoadStoreSingleStructure(1, 0, 6, 0, size >> 4, Rt, Rn, Rm);
 }
 void ARM64FloatEmitter::LD2R(u8 size, ARM64Reg Rt, ARM64Reg Rn, ARM64Reg Rm)
 {
-  EmitLoadStoreSingleStructure(1, 1, 6, 0, MathUtil::IntLog2(size) - 3, Rt, Rn, Rm);
+  EmitLoadStoreSingleStructure(1, 1, 6, 0, size >> 4, Rt, Rn, Rm);
 }
 
 void ARM64FloatEmitter::ST1(u8 size, ARM64Reg Rt, u8 index, ARM64Reg Rn)
@@ -3123,10 +3151,6 @@ void ARM64FloatEmitter::DUP(u8 size, ARM64Reg Rd, ARM64Reg Rn, u8 index)
 
   EmitCopy(IsQuad(Rd), 0, imm5, 0, Rd, Rn);
 }
-void ARM64FloatEmitter::EOR(ARM64Reg Rd, ARM64Reg Rn, ARM64Reg Rm)
-{
-  EmitThreeSame(1, 0, 3, Rd, Rn, Rm);
-}
 void ARM64FloatEmitter::FABS(u8 size, ARM64Reg Rd, ARM64Reg Rn)
 {
   Emit2RegMisc(IsQuad(Rd), 0, 2 | (size >> 6), 0xF, Rd, Rn);
@@ -3209,15 +3233,15 @@ void ARM64FloatEmitter::ORN(ARM64Reg Rd, ARM64Reg Rn, ARM64Reg Rm)
 }
 void ARM64FloatEmitter::REV16(u8 size, ARM64Reg Rd, ARM64Reg Rn)
 {
-  Emit2RegMisc(IsQuad(Rd), 0, MathUtil::IntLog2(size) - 3, 1, Rd, Rn);
+  Emit2RegMisc(IsQuad(Rd), 0, size >> 4, 1, Rd, Rn);
 }
 void ARM64FloatEmitter::REV32(u8 size, ARM64Reg Rd, ARM64Reg Rn)
 {
-  Emit2RegMisc(IsQuad(Rd), 1, MathUtil::IntLog2(size) - 3, 0, Rd, Rn);
+  Emit2RegMisc(IsQuad(Rd), 1, size >> 4, 0, Rd, Rn);
 }
 void ARM64FloatEmitter::REV64(u8 size, ARM64Reg Rd, ARM64Reg Rn)
 {
-  Emit2RegMisc(IsQuad(Rd), 0, MathUtil::IntLog2(size) - 3, 0, Rd, Rn);
+  Emit2RegMisc(IsQuad(Rd), 0, size >> 4, 0, Rd, Rn);
 }
 void ARM64FloatEmitter::SCVTF(u8 size, ARM64Reg Rd, ARM64Reg Rn)
 {
@@ -3237,27 +3261,27 @@ void ARM64FloatEmitter::UCVTF(u8 size, ARM64Reg Rd, ARM64Reg Rn, int scale)
 }
 void ARM64FloatEmitter::SQXTN(u8 dest_size, ARM64Reg Rd, ARM64Reg Rn)
 {
-  Emit2RegMisc(false, 0, MathUtil::IntLog2(dest_size) - 3, 0b10100, Rd, Rn);
+  Emit2RegMisc(false, 0, dest_size >> 4, 0b10100, Rd, Rn);
 }
 void ARM64FloatEmitter::SQXTN2(u8 dest_size, ARM64Reg Rd, ARM64Reg Rn)
 {
-  Emit2RegMisc(true, 0, MathUtil::IntLog2(dest_size) - 3, 0b10100, Rd, Rn);
+  Emit2RegMisc(true, 0, dest_size >> 4, 0b10100, Rd, Rn);
 }
 void ARM64FloatEmitter::UQXTN(u8 dest_size, ARM64Reg Rd, ARM64Reg Rn)
 {
-  Emit2RegMisc(false, 1, MathUtil::IntLog2(dest_size) - 3, 0b10100, Rd, Rn);
+  Emit2RegMisc(false, 1, dest_size >> 4, 0b10100, Rd, Rn);
 }
 void ARM64FloatEmitter::UQXTN2(u8 dest_size, ARM64Reg Rd, ARM64Reg Rn)
 {
-  Emit2RegMisc(true, 1, MathUtil::IntLog2(dest_size) - 3, 0b10100, Rd, Rn);
+  Emit2RegMisc(true, 1, dest_size >> 4, 0b10100, Rd, Rn);
 }
 void ARM64FloatEmitter::XTN(u8 dest_size, ARM64Reg Rd, ARM64Reg Rn)
 {
-  Emit2RegMisc(false, 0, MathUtil::IntLog2(dest_size) - 3, 0b10010, Rd, Rn);
+  Emit2RegMisc(false, 0, dest_size >> 4, 0b10010, Rd, Rn);
 }
 void ARM64FloatEmitter::XTN2(u8 dest_size, ARM64Reg Rd, ARM64Reg Rn)
 {
-  Emit2RegMisc(true, 0, MathUtil::IntLog2(dest_size) - 3, 0b10010, Rd, Rn);
+  Emit2RegMisc(true, 0, dest_size >> 4, 0b10010, Rd, Rn);
 }
 
 // Move
@@ -3476,53 +3500,6 @@ void ARM64FloatEmitter::UCVTF(ARM64Reg Rd, ARM64Reg Rn, int scale)
   EmitConversion2(sf, 0, false, type, 0, 3, 64 - scale, Rd, Rn);
 }
 
-// Comparison
-void ARM64FloatEmitter::CMEQ(u8 size, ARM64Reg Rd, ARM64Reg Rn, ARM64Reg Rm)
-{
-  EmitThreeSame(1, MathUtil::IntLog2(size) - 3, 0x11, Rd, Rn, Rm);
-}
-void ARM64FloatEmitter::CMEQ(u8 size, ARM64Reg Rd, ARM64Reg Rn)
-{
-  Emit2RegMisc(IsQuad(Rd), 0, MathUtil::IntLog2(size) - 3, 0x9, Rd, Rn);
-}
-void ARM64FloatEmitter::CMGE(u8 size, ARM64Reg Rd, ARM64Reg Rn, ARM64Reg Rm)
-{
-  EmitThreeSame(0, MathUtil::IntLog2(size) - 3, 0x7, Rd, Rn, Rm);
-}
-void ARM64FloatEmitter::CMGE(u8 size, ARM64Reg Rd, ARM64Reg Rn)
-{
-  Emit2RegMisc(IsQuad(Rd), 1, MathUtil::IntLog2(size) - 3, 0x8, Rd, Rn);
-}
-void ARM64FloatEmitter::CMGT(u8 size, ARM64Reg Rd, ARM64Reg Rn, ARM64Reg Rm)
-{
-  EmitThreeSame(0, MathUtil::IntLog2(size) - 3, 0x6, Rd, Rn, Rm);
-}
-void ARM64FloatEmitter::CMGT(u8 size, ARM64Reg Rd, ARM64Reg Rn)
-{
-  Emit2RegMisc(IsQuad(Rd), 0, MathUtil::IntLog2(size) - 3, 0x8, Rd, Rn);
-}
-void ARM64FloatEmitter::CMHI(u8 size, ARM64Reg Rd, ARM64Reg Rn, ARM64Reg Rm)
-{
-  EmitThreeSame(1, MathUtil::IntLog2(size) - 3, 0x6, Rd, Rn, Rm);
-}
-void ARM64FloatEmitter::CMHS(u8 size, ARM64Reg Rd, ARM64Reg Rn, ARM64Reg Rm)
-{
-  EmitThreeSame(1, MathUtil::IntLog2(size) - 3, 0x7, Rd, Rn, Rm);
-}
-void ARM64FloatEmitter::CMLE(u8 size, ARM64Reg Rd, ARM64Reg Rn)
-{
-  Emit2RegMisc(IsQuad(Rd), 1, MathUtil::IntLog2(size) - 3, 0x9, Rd, Rn);
-}
-void ARM64FloatEmitter::CMLT(u8 size, ARM64Reg Rd, ARM64Reg Rn)
-{
-  Emit2RegMisc(IsQuad(Rd), 0, MathUtil::IntLog2(size) - 3, 0xA, Rd, Rn);
-}
-void ARM64FloatEmitter::CMTST(u8 size, ARM64Reg Rd, ARM64Reg Rn, ARM64Reg Rm)
-{
-  EmitThreeSame(0, MathUtil::IntLog2(size) - 3, 0x11, Rd, Rn, Rm);
-}
-
-// Float comparison
 void ARM64FloatEmitter::FCMP(ARM64Reg Rn, ARM64Reg Rm)
 {
   EmitCompare(0, 0, 0, 0, Rn, Rm);
@@ -3682,7 +3659,7 @@ void ARM64FloatEmitter::SHL(u8 src_size, ARM64Reg Rd, ARM64Reg Rn, u32 shift)
 {
   ASSERT_MSG(DYNA_REC, shift < src_size, "Shift amount must be less than the element size! {} {}",
              shift, src_size);
-  EmitShiftImm(IsQuad(Rd), 0, src_size | shift, 0b01010, Rd, Rn);
+  EmitShiftImm(1, 0, src_size | shift, 0b01010, Rd, Rn);
 }
 
 void ARM64FloatEmitter::SSHLL(u8 src_size, ARM64Reg Rd, ARM64Reg Rn, u32 shift, bool upper)
@@ -3692,18 +3669,11 @@ void ARM64FloatEmitter::SSHLL(u8 src_size, ARM64Reg Rd, ARM64Reg Rn, u32 shift, 
   EmitShiftImm(upper, 0, src_size | shift, 0b10100, Rd, Rn);
 }
 
-void ARM64FloatEmitter::SSHR(u8 src_size, ARM64Reg Rd, ARM64Reg Rn, u32 shift)
-{
-  ASSERT_MSG(DYNA_REC, shift < src_size, "Shift amount must be less than the element size! {} {}",
-             shift, src_size);
-  EmitShiftImm(IsQuad(Rd), 0, src_size * 2 - shift, 0b00000, Rd, Rn);
-}
-
 void ARM64FloatEmitter::URSHR(u8 src_size, ARM64Reg Rd, ARM64Reg Rn, u32 shift)
 {
   ASSERT_MSG(DYNA_REC, shift < src_size, "Shift amount must be less than the element size! {} {}",
              shift, src_size);
-  EmitShiftImm(IsQuad(Rd), 1, src_size * 2 - shift, 0b00100, Rd, Rn);
+  EmitShiftImm(1, 1, src_size * 2 - shift, 0b00100, Rd, Rn);
 }
 
 void ARM64FloatEmitter::USHLL(u8 src_size, ARM64Reg Rd, ARM64Reg Rn, u32 shift, bool upper)

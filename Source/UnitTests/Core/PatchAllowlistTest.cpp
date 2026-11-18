@@ -1,8 +1,7 @@
 // Copyright 2024 Dolphin Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#ifdef USE_RETRO_ACHIEVEMENTS
-
+#include <array>
 #include <map>
 #include <string>
 #include <string_view>
@@ -16,10 +15,12 @@
 #include "Common/CommonPaths.h"
 #include "Common/Crypto/SHA1.h"
 #include "Common/FileUtil.h"
+#include "Common/IOFile.h"
 #include "Common/IniFile.h"
 #include "Common/JsonUtil.h"
-#include "Core/AchievementApprovedHash.h"
+#include "Core/AchievementManager.h"
 #include "Core/ActionReplay.h"
+#include "Core/CheatCodes.h"
 #include "Core/GeckoCode.h"
 #include "Core/GeckoCodeConfig.h"
 #include "Core/PatchEngine.h"
@@ -128,22 +129,23 @@ TEST(PatchAllowlist, VerifyHashes)
   auto context = Common::SHA1::CreateContext();
   context->Update(new_allowlist_str);
   auto digest = context->Finish();
-  if (digest != ACHIEVEMENT_APPROVED_LIST_HASH)
+  if (digest != AchievementManager::APPROVED_LIST_HASH)
   {
-    ADD_FAILURE() << "Approved list hash does not match the one in AchievementApprovedHash.h."
-                  << std::endl;
+    ADD_FAILURE() << "Approved list hash does not match the one in AchievementMananger."
+                  << std::endl
+                  << "Please update APPROVED_LIST_HASH to the following:" << std::endl
+                  << Common::SHA1::DigestToString(digest);
   }
   // Compare with old allowlist
+  static constexpr std::string_view APPROVED_LIST_FILENAME = "ApprovedInis.json";
   std::string old_allowlist;
   std::string error;
-  const auto& list_filepath =
-      fmt::format("{}{}{}", sys_directory, DIR_SEP, ACHIEVEMENT_APPROVED_LIST_FILENAME);
+  const auto& list_filepath = fmt::format("{}{}{}", sys_directory, DIR_SEP, APPROVED_LIST_FILENAME);
   if (!File::ReadFileToString(list_filepath, old_allowlist) || old_allowlist != new_allowlist_str)
   {
-    static constexpr std::string_view NEW_ACHIEVEMENT_APPROVED_LIST_FILENAME =
-        "New-ApprovedInis.json";
+    static constexpr std::string_view NEW_APPROVED_LIST_FILENAME = "New-ApprovedInis.json";
     const auto& new_list_filepath =
-        fmt::format("{}{}{}", sys_directory, DIR_SEP, NEW_ACHIEVEMENT_APPROVED_LIST_FILENAME);
+        fmt::format("{}{}{}", sys_directory, DIR_SEP, NEW_APPROVED_LIST_FILENAME);
     if (!JsonToFile(new_list_filepath, picojson::value(new_allowlist), false))
     {
       ADD_FAILURE() << "Failed to write new approved list to " << list_filepath;
@@ -189,5 +191,3 @@ void ReadVerified(const Common::IniFile& ini, const std::string& filename,
     }
   }
 }
-
-#endif  // USE_RETRO_ACHIEVEMENTS

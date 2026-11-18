@@ -4,7 +4,11 @@
 #pragma once
 
 #include <mutex>
+#include <thread>
+#include <vector>
 
+#include "Common/Flag.h"
+#include "Common/Network.h"
 #include "Core/HW/EXI/BBA/TAPServerConnection.h"
 #include "Core/HW/EXI/EXI_Device.h"
 

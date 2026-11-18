@@ -9,10 +9,12 @@
 #include "Common/FileSearch.h"
 #include "Common/FileUtil.h"
 #include "Core/ConfigManager.h"
+#include "Core/Core.h"
 
 #include "InputCommon/DynamicInputTextures/DITConfiguration.h"
 #include "InputCommon/ImageOperations.h"
 #include "VideoCommon/HiresTextures.h"
+#include "VideoCommon/TextureCacheBase.h"
 
 namespace InputCommon
 {
@@ -23,13 +25,14 @@ DynamicInputTextureManager::~DynamicInputTextureManager() = default;
 void DynamicInputTextureManager::Load()
 {
   m_configuration.clear();
+
+  const std::string& game_id = SConfig::GetInstance().GetGameID();
   const std::set<std::string> dynamic_input_directories =
-      GetTextureDirectoriesForFirstMatchingGameId(File::GetUserPath(D_DYNAMICINPUT_IDX),
-                                                  SConfig::GetInstance().GetGameIDsForTextures());
+      GetTextureDirectoriesWithGameId(File::GetUserPath(D_DYNAMICINPUT_IDX), game_id);
 
   for (const auto& dynamic_input_directory : dynamic_input_directories)
   {
-    const auto json_files = Common::DoFileSearch(dynamic_input_directory, ".json");
+    const auto json_files = Common::DoFileSearch({dynamic_input_directory}, {".json"});
     for (auto& file : json_files)
     {
       m_configuration.emplace_back(file);
@@ -45,8 +48,8 @@ void DynamicInputTextureManager::GenerateTextures(const Common::IniFile& file,
   {
     configuration.GenerateTextures(file, controller_names, &output);
   }
-  // write to highest preference gameid for textures
-  const std::string& game_id_for_textures = SConfig::GetInstance().GetGameIDForTextures();
+
+  const std::string& game_id = SConfig::GetInstance().GetGameID();
   for (const auto& [generated_folder_name, images] : output)
   {
     const auto hi_res_folder = File::GetUserPath(D_HIRESTEXTURES_IDX) + generated_folder_name;
@@ -62,7 +65,7 @@ void DynamicInputTextureManager::GenerateTextures(const Common::IniFile& file,
       File::CreateDir(game_id_folder);
     }
 
-    File::CreateEmptyFile(game_id_folder + DIR_SEP + game_id_for_textures + ".txt");
+    File::CreateEmptyFile(game_id_folder + DIR_SEP + game_id + ".txt");
 
     for (const auto& [image_name, image] : images)
     {

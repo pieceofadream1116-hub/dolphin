@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <windows.h>
+#include <Windows.h>
 #include <unordered_set>
 
 namespace ciface::DInput

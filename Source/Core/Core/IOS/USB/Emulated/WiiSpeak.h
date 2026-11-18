@@ -7,15 +7,14 @@
 #include <memory>
 #include <vector>
 
-#include "AudioCommon/Microphone.h"
 #include "Common/CommonTypes.h"
 #include "Core/IOS/USB/Common.h"
+#include "Core/IOS/USB/Emulated/Microphone.h"
 
 namespace IOS::HLE::USB
 {
-class WiiSpeakState final : public AudioCommon::MicrophoneState
+struct WiiSpeakState
 {
-public:
   // Use atomic for members concurrently used by the data callback
   std::atomic<bool> sample_on;
   std::atomic<bool> mute;
@@ -25,10 +24,6 @@ public:
   bool sp_on;
 
   static constexpr u32 DEFAULT_SAMPLING_RATE = 16000;
-
-  bool IsSampleOn() const override;
-  bool IsMuted() const override;
-  u32 GetDefaultSamplingRate() const override;
 };
 
 class WiiSpeak final : public Device
@@ -40,12 +35,12 @@ public:
   DeviceDescriptor GetDeviceDescriptor() const override;
   std::vector<ConfigDescriptor> GetConfigurations() const override;
   std::vector<InterfaceDescriptor> GetInterfaces(u8 config) const override;
-  std::vector<EndpointDescriptor> GetEndpoints(u8 config, u8 iface, u8 alt) const override;
+  std::vector<EndpointDescriptor> GetEndpoints(u8 config, u8 interface, u8 alt) const override;
   bool Attach() override;
-  bool AttachAndChangeInterface(u8 f) override;
+  bool AttachAndChangeInterface(u8 interface) override;
   int CancelTransfer(u8 endpoint) override;
-  int ChangeInterface(u8 iface) override;
-  int GetNumberOfAltSettings(u8 iface) override;
+  int ChangeInterface(u8 interface) override;
+  int GetNumberOfAltSettings(u8 interface) override;
   int SetAltSetting(u8 alt_setting) override;
   int SubmitTransfer(std::unique_ptr<CtrlMessage> message) override;
   int SubmitTransfer(std::unique_ptr<BulkMessage> message) override;
@@ -89,7 +84,7 @@ private:
   u8 m_active_interface = 0;
   bool m_device_attached = false;
   bool init = false;
-  std::unique_ptr<AudioCommon::Microphone> m_microphone{};
+  std::unique_ptr<Microphone> m_microphone{};
   const DeviceDescriptor m_device_descriptor{0x12,  0x1,    0x200,  0,   0,   0,   0x10,
                                              0x57E, 0x0308, 0x0214, 0x1, 0x2, 0x0, 0x1};
   const std::vector<ConfigDescriptor> m_config_descriptor{

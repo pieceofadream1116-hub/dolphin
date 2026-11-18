@@ -161,7 +161,7 @@ bool VertexShaderManager::UseVertexDepthRange()
 
 // Syncs the shader constant buffers with xfmem
 // TODO: A cleaner way to control the matrices without making a mess in the parameters field
-void VertexShaderManager::SetConstants(std::span<const std::string> textures,
+void VertexShaderManager::SetConstants(const std::vector<std::string>& textures,
                                        XFStateManager& xf_state_manager)
 {
   if (constants.missing_color_hex != g_ActiveConfig.iMissingColorValue)
@@ -388,8 +388,7 @@ void VertexShaderManager::SetConstants(std::span<const std::string> textures,
     }
 
     dirty = true;
-    BPFunctions::SetScissorAndViewport(g_framebuffer_manager.get(), bpmem.scissorTL,
-                                       bpmem.scissorBR, bpmem.scissorOffset, xfmem.viewport);
+    BPFunctions::SetScissorAndViewport();
     g_stats.AddScissorRect();
   }
 

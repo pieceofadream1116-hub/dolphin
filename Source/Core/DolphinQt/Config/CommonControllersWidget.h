@@ -5,6 +5,8 @@
 
 #include <QWidget>
 
+#include <array>
+
 class QCheckBox;
 class QGroupBox;
 class QVBoxLayout;
@@ -18,7 +20,6 @@ public:
 
 private:
   void OnControllerInterfaceConfigure();
-  void OnSDLHintConfigure();
 
   void CreateLayout();
   void ConnectWidgets();
@@ -30,5 +31,4 @@ private:
   QVBoxLayout* m_common_layout;
   QCheckBox* m_common_bg_input;
   QPushButton* m_common_configure_controller_interface;
-  QPushButton* m_common_configure_sdl_hints;
 };

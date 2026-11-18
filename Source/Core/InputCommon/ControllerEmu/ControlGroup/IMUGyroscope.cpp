@@ -163,7 +163,7 @@ std::optional<IMUGyroscope::StateData> IMUGyroscope::GetState(bool update)
 
 ControlState IMUGyroscope::GetDeadzone() const
 {
-  return MathUtil::DegreesToRadians(m_deadzone_setting.GetValue());
+  return m_deadzone_setting.GetValue() / 360 * MathUtil::TAU;
 }
 
 bool IMUGyroscope::IsCalibrating() const

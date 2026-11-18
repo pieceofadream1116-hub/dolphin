@@ -12,3 +12,4 @@ set(ZLIB_LIBRARY ZLIB::ZLIB CACHE STRING "Path to zlib library")
 
 # Setup zlib alias project so FindZLIB doesn't recreate it
 add_library(ZLIB::ZLIB ALIAS zlib)
+dolphin_disable_warnings(zlib)

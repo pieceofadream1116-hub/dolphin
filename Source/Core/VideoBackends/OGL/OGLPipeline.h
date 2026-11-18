@@ -5,6 +5,7 @@
 
 #include <memory>
 
+#include "Common/GL/GLUtil.h"
 #include "VideoBackends/OGL/ProgramShaderCache.h"
 #include "VideoCommon/AbstractPipeline.h"
 #include "VideoCommon/RenderState.h"
@@ -15,8 +16,9 @@ class OGLPipeline final : public AbstractPipeline
 {
 public:
   explicit OGLPipeline(const AbstractPipelineConfig& config, const GLVertexFormat* vertex_format,
-                       RasterizationState rasterization_state, DepthState depth_state,
-                       BlendingState blending_state, PipelineProgram* program, GLenum gl_primitive);
+                       const RasterizationState& rasterization_state, const DepthState& depth_state,
+                       const BlendingState& blending_state, PipelineProgram* program,
+                       GLenum gl_primitive);
   ~OGLPipeline() override;
 
   const GLVertexFormat* GetVertexFormat() const { return m_vertex_format; }

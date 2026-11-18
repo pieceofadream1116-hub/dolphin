@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <vector>
+
 #include <QByteArray>
 #include <QDockWidget>
 

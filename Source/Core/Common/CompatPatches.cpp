@@ -1,7 +1,7 @@
 // Copyright 2008 Dolphin Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <windows.h>
+#include <Windows.h>
 #include <functional>
 #include <optional>
 #include <string>
@@ -124,7 +124,7 @@ private:
   PIMAGE_DATA_DIRECTORY directories;
 };
 
-static void CompatPatchesInstall(LdrWatcher* watcher)
+void CompatPatchesInstall(LdrWatcher* watcher)
 {
   watcher->Install({{L"EZFRD64.dll", L"811EZFRD64.DLL"}, [](const LdrDllLoadEvent& event) {
                       // *EZFRD64 is included in software packages for cheapo third-party gamepads

@@ -36,8 +36,6 @@ private:
   void ToggleUnofficial();
   void ToggleEncore();
   void ToggleSpectator();
-  void ToggleLeaderboardTracker();
-  void ToggleChallengeIndicators();
   void ToggleDiscordPresence();
   void ToggleProgress();
 
@@ -55,11 +53,8 @@ private:
   ToolTipCheckBox* m_common_unofficial_enabled_input;
   ToolTipCheckBox* m_common_encore_enabled_input;
   ToolTipCheckBox* m_common_spectator_enabled_input;
-  ToolTipCheckBox* m_common_leaderboard_tracker_enabled_input;
-  ToolTipCheckBox* m_common_challenge_indicators_enabled_input;
   ToolTipCheckBox* m_common_discord_presence_enabled_input;
   ToolTipCheckBox* m_common_progress_enabled_input;
-  ToolTipCheckBox* m_sound_enabled_input;
 };
 
 #endif  // USE_RETRO_ACHIEVEMENTS

@@ -20,6 +20,7 @@
 #include "Common/IOFile.h"
 #include "Common/Logging/Log.h"
 #include "Common/StringUtil.h"
+#include "Common/Unreachable.h"
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/Debugger/DebugInterface.h"
@@ -67,39 +68,40 @@ void PPCSymbolDB::AddKnownSymbol(const Core::CPUThreadGuard& guard, u32 startAdd
                                  Common::Symbol::Type type, XFuncMap* functions,
                                  XFuncPtrMap* checksum_to_function)
 {
-  const auto [iter, inserted] = functions->try_emplace(startAddr, name);
-
-  Common::Symbol& symbol = iter->second;
-  symbol.object_name = object_name;
-  symbol.type = type;
-
-  if (!inserted)
+  auto iter = functions->find(startAddr);
+  if (iter != functions->end())
   {
     // already got it, let's just update name, checksum & size to be sure.
-    symbol.Rename(name);
-    symbol.hash = HashSignatureDB::ComputeCodeChecksum(guard, startAddr, startAddr + size - 4);
-    symbol.size = size;
+    Common::Symbol* tempfunc = &iter->second;
+    tempfunc->Rename(name);
+    tempfunc->object_name = object_name;
+    tempfunc->hash = HashSignatureDB::ComputeCodeChecksum(guard, startAddr, startAddr + size - 4);
+    tempfunc->type = type;
+    tempfunc->size = size;
   }
   else
   {
     // new symbol. run analyze.
-    symbol.address = startAddr;
+    auto& new_symbol = functions->emplace(startAddr, name).first->second;
+    new_symbol.object_name = object_name;
+    new_symbol.type = type;
+    new_symbol.address = startAddr;
 
-    if (symbol.type == Common::Symbol::Type::Function)
+    if (new_symbol.type == Common::Symbol::Type::Function)
     {
-      PPCAnalyst::AnalyzeFunction(guard, startAddr, symbol, size);
+      PPCAnalyst::AnalyzeFunction(guard, startAddr, new_symbol, size);
       // Do not truncate symbol when a size is expected
-      if (size != 0 && symbol.size != size)
+      if (size != 0 && new_symbol.size != size)
       {
         WARN_LOG_FMT(SYMBOLS, "Analysed symbol ({}) size mismatch, {} expected but {} computed",
-                     name, size, symbol.size);
-        symbol.size = size;
+                     name, size, new_symbol.size);
+        new_symbol.size = size;
       }
-      (*checksum_to_function)[symbol.hash].insert(&symbol);
+      (*checksum_to_function)[new_symbol.hash].insert(&new_symbol);
     }
     else
     {
-      symbol.size = size;
+      new_symbol.size = size;
     }
   }
 }
@@ -112,14 +114,24 @@ void PPCSymbolDB::AddKnownNote(u32 start_addr, u32 size, const std::string& name
 
 void PPCSymbolDB::AddKnownNote(u32 start_addr, u32 size, const std::string& name, XNoteMap* notes)
 {
-  const auto [iter, inserted] = notes->try_emplace(start_addr);
+  auto iter = notes->find(start_addr);
 
-  Common::Note& note = iter->second;
-  note.name = name;
-  note.size = size;
+  if (iter != notes->end())
+  {
+    // Already got it, just update the name and size.
+    Common::Note* tempfunc = &iter->second;
+    tempfunc->name = name;
+    tempfunc->size = size;
+  }
+  else
+  {
+    Common::Note tf;
+    tf.name = name;
+    tf.address = start_addr;
+    tf.size = size;
 
-  if (inserted)
-    note.address = start_addr;
+    (*notes)[start_addr] = tf;
+  }
 }
 
 void PPCSymbolDB::DetermineNoteLayers()
@@ -224,17 +236,13 @@ std::string PPCSymbolDB::GetDescription(u32 addr) const
 void PPCSymbolDB::FillInCallers()
 {
   std::lock_guard lock(m_mutex);
-  FillInCallers(&m_functions);
-}
 
-void PPCSymbolDB::FillInCallers(XFuncMap* functions)
-{
-  for (auto& p : *functions)
+  for (auto& p : m_functions)
   {
     p.second.callers.clear();
   }
 
-  for (auto& entry : *functions)
+  for (auto& entry : m_functions)
   {
     Common::Symbol& f = entry.second;
     for (const Common::SCall& call : f.calls)
@@ -242,8 +250,8 @@ void PPCSymbolDB::FillInCallers(XFuncMap* functions)
       const Common::SCall new_call(entry.first, call.call_address);
       const u32 function_address = call.function;
 
-      auto func_iter = functions->find(function_address);
-      if (func_iter != functions->end())
+      auto func_iter = m_functions.find(function_address);
+      if (func_iter != m_functions.end())
       {
         Common::Symbol& called_function = func_iter->second;
         called_function.callers.push_back(new_call);
@@ -546,7 +554,7 @@ bool PPCSymbolDB::LoadMap(const Core::CPUThreadGuard& guard, std::string filenam
       break;
     default:
       // Should never happen
-      std::unreachable();
+      Common::Unreachable();
       break;
     }
 
@@ -614,7 +622,7 @@ bool PPCSymbolDB::LoadMap(const Core::CPUThreadGuard& guard, std::string filenam
 
   Index(&new_functions);
   DetermineNoteLayers(&new_notes);
-  FillInCallers(&new_functions);
+  FillInCallers();
 
   std::lock_guard lock(m_mutex);
   std::swap(m_functions, new_functions);
@@ -636,10 +644,10 @@ bool PPCSymbolDB::SaveSymbolMap(const std::string& filename) const
   std::lock_guard lock(m_mutex);
 
   // Write .text section
-  auto function_symbols = m_functions | std::views::filter([](const auto& f) {
-                            return f.second.type == Common::Symbol::Type::Function;
-                          }) |
-                          std::views::transform([](const auto& f) { return f.second; });
+  auto function_symbols =
+      m_functions |
+      std::views::filter([](auto f) { return f.second.type == Common::Symbol::Type::Function; }) |
+      std::views::transform([](auto f) { return f.second; });
   file.WriteString(".text section layout\n");
   for (const auto& symbol : function_symbols)
   {
@@ -654,10 +662,10 @@ bool PPCSymbolDB::SaveSymbolMap(const std::string& filename) const
   }
 
   // Write .data section
-  auto data_symbols = m_functions | std::views::filter([](const auto& f) {
-                        return f.second.type == Common::Symbol::Type::Data;
-                      }) |
-                      std::views::transform([](const auto& f) { return f.second; });
+  auto data_symbols =
+      m_functions |
+      std::views::filter([](auto f) { return f.second.type == Common::Symbol::Type::Data; }) |
+      std::views::transform([](auto f) { return f.second; });
   file.WriteString("\n.data section layout\n");
   for (const auto& symbol : data_symbols)
   {
@@ -672,7 +680,7 @@ bool PPCSymbolDB::SaveSymbolMap(const std::string& filename) const
   }
 
   // Write .note section
-  auto note_symbols = m_notes | std::views::transform([](const auto& f) { return f.second; });
+  auto note_symbols = m_notes | std::views::transform([](auto f) { return f.second; });
   file.WriteString("\n.note section layout\n");
   for (const auto& symbol : note_symbols)
   {

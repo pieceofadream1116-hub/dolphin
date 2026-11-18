@@ -14,6 +14,7 @@
 
 #include "InputCommon/ControlReference/ControlReference.h"
 #include "InputCommon/ControllerEmu/Control/Control.h"
+#include "InputCommon/ControllerEmu/Control/Input.h"
 #include "InputCommon/ControllerEmu/ControllerEmu.h"
 #include "InputCommon/ControllerEmu/Setting/NumericSetting.h"
 
@@ -167,12 +168,12 @@ Cursor::StateData Cursor::UpdateState(Cursor::ReshapeData input)
 
 ControlState Cursor::GetTotalYaw() const
 {
-  return MathUtil::DegreesToRadians(m_yaw_setting.GetValue());
+  return m_yaw_setting.GetValue() * MathUtil::TAU / 360;
 }
 
 ControlState Cursor::GetTotalPitch() const
 {
-  return MathUtil::DegreesToRadians(m_pitch_setting.GetValue());
+  return m_pitch_setting.GetValue() * MathUtil::TAU / 360;
 }
 
 ControlState Cursor::GetVerticalOffset() const

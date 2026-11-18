@@ -14,7 +14,7 @@ void SkipAction::OnDrawStarted(GraphicsModActionData::DrawStarted* draw_started)
   *draw_started->skip = true;
 }
 
-void SkipAction::BeforeEFB(GraphicsModActionData::PreEFB* efb)
+void SkipAction::OnEFB(GraphicsModActionData::EFB* efb)
 {
   if (!efb) [[unlikely]]
     return;

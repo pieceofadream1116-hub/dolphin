@@ -5,13 +5,12 @@
 
 #include <algorithm>
 #include <cmath>
-#include <numbers>
 #include <optional>
 
 #include "Common/MathUtil.h"
-#include "Common/Matrix.h"
 #include "Core/Config/SYSCONFSettings.h"
 #include "Core/HW/WiimoteEmu/WiimoteEmu.h"
+#include "InputCommon/ControllerEmu/ControlGroup/Buttons.h"
 #include "InputCommon/ControllerEmu/ControlGroup/Cursor.h"
 #include "InputCommon/ControllerEmu/ControlGroup/Force.h"
 #include "InputCommon/ControllerEmu/ControlGroup/IMUAccelerometer.h"
@@ -68,7 +67,7 @@ Common::Quaternion ComplementaryFilter(const Common::Quaternion& gyroscope,
 
   const auto cos_angle = normalized_accel.Dot(gyro_vec);
 
-  // If gyro to accel angle difference is between 0 and 180 degrees we make an adjustment.
+  // If gyro to accel angle difference is betwen 0 and 180 degrees we make an adjustment.
   const auto abs_cos_angle = std::abs(cos_angle);
   if (abs_cos_angle > 0 && abs_cos_angle < 1)
   {
@@ -114,8 +113,8 @@ void EmulateTilt(RotationalState* state, ControllerEmu::Tilt* const tilt_group, 
   const auto target = tilt_group->GetState();
 
   // 180 degrees is currently the max tilt value.
-  const ControlState roll = target.x * std::numbers::pi;
-  const ControlState pitch = target.y * std::numbers::pi;
+  const ControlState roll = target.x * MathUtil::PI;
+  const ControlState pitch = target.y * MathUtil::PI;
 
   const auto target_angle = Common::Vec3(pitch, -roll, 0);
 
@@ -123,7 +122,7 @@ void EmulateTilt(RotationalState* state, ControllerEmu::Tilt* const tilt_group, 
   for (std::size_t i = 0; i != target_angle.data.size(); ++i)
   {
     auto& angle = state->angle.data[i];
-    if (std::abs(angle - target_angle.data[i]) > std::numbers::pi_v<float>)
+    if (std::abs(angle - target_angle.data[i]) > float(MathUtil::PI))
       angle -= std::copysign(MathUtil::TAU, angle);
   }
 
@@ -147,9 +146,9 @@ void EmulateSwing(MotionState* state, ControllerEmu::Force* swing_group, float t
   const auto xz_target_dist = Common::Vec2{target_position.x, target_position.z}.Length();
   const auto y_target_dist = std::abs(target_position.y);
   const auto target_dist = Common::Vec3{xz_target_dist, y_target_dist, xz_target_dist};
-  const auto speed = Common::Vec3::Lerp(
-      Common::Vec3{1, 1, 1} * float(swing_group->GetReturnSpeed()),
-      Common::Vec3{1, 1, 1} * float(swing_group->GetSpeed()), target_dist / max_distance);
+  const auto speed = MathUtil::Lerp(Common::Vec3{1, 1, 1} * float(swing_group->GetReturnSpeed()),
+                                    Common::Vec3{1, 1, 1} * float(swing_group->GetSpeed()),
+                                    target_dist / max_distance);
 
   // Convert our m/s "speed" to the jerk required to reach this speed when traveling 1 meter.
   const auto max_jerk = speed * speed * speed * 4;
@@ -267,7 +266,7 @@ void EmulatePoint(MotionState* state, ControllerEmu::Cursor* ir_group,
   // Higher values will be more responsive but increase rate of M+ "desync".
   // I'd rather not expose this value in the UI if not needed.
   // At this value, sync is very good and responsiveness still appears instant.
-  constexpr auto MAX_ACCEL = MathUtil::TAU_v<float> * 8;
+  constexpr auto MAX_ACCEL = float(MathUtil::TAU * 8);
 
   ApproachAngleWithAccel(state, target_angle, MAX_ACCEL, time_elapsed);
 }

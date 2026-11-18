@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <cstring>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -130,11 +131,10 @@ struct DTMHeader
   u8 reserved3;
   bool bFollowBranch;
   bool bUseFMA;
-  u8 GBAControllers;  // GBA Controllers plugged in (the bits are ports 1-4)
-  bool bWidescreen;   // true indicates SYSCONF aspect ratio is 16:9, false for 4:3
-  u8 countryCode;     // SYSCONF country code
-  u8 uSkipEFBCopyToRamClearByte;
-  std::array<u8, 4> reserved;       // Padding for any new config options
+  u8 GBAControllers;                // GBA Controllers plugged in (the bits are ports 1-4)
+  bool bWidescreen;                 // true indicates SYSCONF aspect ratio is 16:9, false for 4:3
+  u8 countryCode;                   // SYSCONF country code
+  std::array<u8, 5> reserved;       // Padding for any new config options
   std::array<char, 40> discChange;  // Name of iso file to switch to, for two disc games.
   std::array<u8, 20> revision;      // Git hash
   u32 DSPiromHash;
@@ -199,7 +199,7 @@ public:
   bool IsUsingBongo(int controller) const;
   bool IsUsingGBA(int controller) const;
   void ChangePads();
-  void ChangeWiiPads();
+  void ChangeWiiPads(bool instantly = false);
 
   void SetReadOnly(bool bEnabled);
 

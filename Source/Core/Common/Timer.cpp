@@ -5,12 +5,12 @@
 
 #include <chrono>
 #include <thread>
-#include "Common/CommonFuncs.h"
 
 #ifdef _WIN32
-#include <windows.h>
-#include <ctime>
+#include <Windows.h>
 #include <timeapi.h>
+#else
+#include <sys/time.h>
 #endif
 
 #include "Common/CommonTypes.h"
@@ -69,6 +69,12 @@ u64 Timer::ElapsedMs() const
 
 u64 Timer::GetLocalTimeSinceJan1970()
 {
+#ifdef _MSC_VER
+  std::chrono::zoned_seconds seconds(
+      std::chrono::current_zone(),
+      std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()));
+  return seconds.get_local_time().time_since_epoch().count();
+#else
   time_t sysTime, tzDiff, tzDST;
   time(&sysTime);
   tm* gmTime = localtime(&sysTime);
@@ -84,6 +90,7 @@ u64 Timer::GetLocalTimeSinceJan1970()
   tzDiff = sysTime - mktime(gmTime);
 
   return static_cast<u64>(sysTime + tzDiff + tzDST);
+#endif
 }
 
 // This is requested by Timer::IncreaseResolution on Windows.
@@ -185,39 +192,6 @@ void PrecisionTimer::SleepUntil(Clock::time_point target)
     std::this_thread::yield();
 #endif
   }
-}
-
-// Results are appropriately slewed on Linux, but not on Windows, macOS, or FreeBSD.
-// Clocks with that functionality seem to not be available there.
-auto SteadyAwakeClock::now() -> time_point
-{
-#if defined(_WIN32)
-  // The count is system time "in units of 100 nanoseconds".
-  using InterruptDuration = std::chrono::duration<ULONGLONG, std::ratio<100, std::nano::den>::type>;
-
-  ULONGLONG interrupt_time{};
-  if (!QueryUnbiasedInterruptTime(&interrupt_time))
-    ERROR_LOG_FMT(COMMON, "QueryUnbiasedInterruptTime");
-
-  return time_point{InterruptDuration{interrupt_time}};
-#else
-  // Note that Linux's CLOCK_MONOTONIC "does not count time that the system is suspended".
-  // This is in contrast to the behavior on macOS and FreeBSD.
-  static constexpr auto clock_id =
-#if defined(__linux__)
-      CLOCK_MONOTONIC;
-#elif defined(__APPLE__)
-      CLOCK_UPTIME_RAW;
-#else
-      CLOCK_UPTIME;
-#endif
-
-  timespec ts{};
-  if (clock_gettime(clock_id, &ts) != 0)
-    ERROR_LOG_FMT(COMMON, "clock_gettime: {}", LastStrerrorString());
-
-  return time_point{std::chrono::seconds{ts.tv_sec} + std::chrono::nanoseconds{ts.tv_nsec}};
-#endif
 }
 
 }  // Namespace Common

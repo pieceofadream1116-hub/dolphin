@@ -9,82 +9,23 @@
 
 using namespace Gen;
 
-GPRRegCache::GPRRegCache(Jit64& jit, XEmitter& emitter) : RegCache{jit, emitter}
+GPRRegCache::GPRRegCache(Jit64& jit) : RegCache{jit}
 {
 }
 
-bool GPRRegCache::IsImm(preg_t preg) const
+void GPRRegCache::StoreRegister(preg_t preg, const OpArg& new_loc)
 {
-  return m_jit.GetConstantPropagation().HasGPR(preg);
-}
-
-u32 GPRRegCache::Imm32(preg_t preg) const
-{
-  ASSERT(m_jit.GetConstantPropagation().HasGPR(preg));
-  return m_jit.GetConstantPropagation().GetGPR(preg);
-}
-
-s32 GPRRegCache::SImm32(preg_t preg) const
-{
-  ASSERT(m_jit.GetConstantPropagation().HasGPR(preg));
-  return m_jit.GetConstantPropagation().GetGPR(preg);
-}
-
-OpArg GPRRegCache::R(preg_t preg) const
-{
-  if (m_regs[preg].IsInHostRegister())
-  {
-    return ::Gen::R(m_regs[preg].GetHostRegister());
-  }
-  else if (m_jit.GetConstantPropagation().HasGPR(preg))
-  {
-    return ::Gen::Imm32(m_jit.GetConstantPropagation().GetGPR(preg));
-  }
-  else
-  {
-    ASSERT_MSG(DYNA_REC, m_regs[preg].IsInPPCState(), "GPR {} missing!", preg);
-    return GetPPCStateLocation(preg);
-  }
-}
-
-void GPRRegCache::StoreRegister(preg_t preg, const OpArg& new_loc,
-                                IgnoreDiscardedRegisters ignore_discarded_registers)
-{
-  if (m_regs[preg].IsInHostRegister())
-  {
-    m_emitter.MOV(32, new_loc, ::Gen::R(m_regs[preg].GetHostRegister()));
-  }
-  else if (m_jit.GetConstantPropagation().HasGPR(preg))
-  {
-    m_emitter.MOV(32, new_loc, ::Gen::Imm32(m_jit.GetConstantPropagation().GetGPR(preg)));
-  }
-  else
-  {
-    ASSERT_MSG(DYNA_REC, ignore_discarded_registers != IgnoreDiscardedRegisters::No,
-               "GPR {} not in host register or constant propagation", preg);
-  }
+  ASSERT_MSG(DYNA_REC, !m_regs[preg].IsDiscarded(), "Discarded register - {}", preg);
+  m_emitter->MOV(32, new_loc, m_regs[preg].Location().value());
 }
 
 void GPRRegCache::LoadRegister(preg_t preg, X64Reg new_loc)
 {
-  const JitCommon::ConstantPropagation& constant_propagation = m_jit.GetConstantPropagation();
-  if (constant_propagation.HasGPR(preg))
-  {
-    m_emitter.MOV(32, ::Gen::R(new_loc), ::Gen::Imm32(constant_propagation.GetGPR(preg)));
-  }
-  else
-  {
-    ASSERT_MSG(DYNA_REC, m_regs[preg].IsInPPCState(), "GPR {} not in PPCState", preg);
-    m_emitter.MOV(32, ::Gen::R(new_loc), GetPPCStateLocation(preg));
-  }
+  ASSERT_MSG(DYNA_REC, !m_regs[preg].IsDiscarded(), "Discarded register - {}", preg);
+  m_emitter->MOV(32, ::Gen::R(new_loc), m_regs[preg].Location().value());
 }
 
-void GPRRegCache::DiscardImm(preg_t preg)
-{
-  m_jit.GetConstantPropagation().ClearGPR(preg);
-}
-
-OpArg GPRRegCache::GetPPCStateLocation(preg_t preg) const
+OpArg GPRRegCache::GetDefaultLocation(preg_t preg) const
 {
   return PPCSTATE_GPR(preg);
 }
@@ -107,14 +48,13 @@ void GPRRegCache::SetImmediate32(preg_t preg, u32 imm_value, bool dirty)
 {
   // "dirty" can be false to avoid redundantly flushing an immediate when
   // processing speculative constants.
-  if (dirty)
-    DiscardRegister(preg);
-  m_jit.GetConstantPropagation().SetGPR(preg, imm_value);
+  DiscardRegContentsIfCached(preg);
+  m_regs[preg].SetToImm32(imm_value, dirty);
 }
 
 BitSet32 GPRRegCache::GetRegUtilization() const
 {
-  return m_jit.js.op->gprWillBeRead | m_jit.js.op->gprWillBeWritten;
+  return m_jit.js.op->gprInUse;
 }
 
 BitSet32 GPRRegCache::CountRegsIn(preg_t preg, u32 lookahead) const

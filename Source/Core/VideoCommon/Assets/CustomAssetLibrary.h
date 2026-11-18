@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <chrono>
+#include <filesystem>
+#include <map>
 #include <string>
 
 namespace VideoCommon
@@ -10,7 +13,7 @@ namespace VideoCommon
 class CustomTextureData;
 struct MaterialData;
 struct MeshData;
-struct RasterSurfaceShaderData;
+struct PixelShaderData;
 struct TextureAndSamplerData;
 
 // This class provides functionality to load
@@ -35,9 +38,8 @@ public:
   // Loads a texture, if there are no levels, bytes loaded will be empty
   virtual LoadInfo LoadTexture(const AssetID& asset_id, CustomTextureData* data) = 0;
 
-  // Loads a raster surface shader
-  virtual LoadInfo LoadRasterSurfaceShader(const AssetID& asset_id,
-                                           RasterSurfaceShaderData* data) = 0;
+  // Loads a pixel shader
+  virtual LoadInfo LoadPixelShader(const AssetID& asset_id, PixelShaderData* data) = 0;
 
   // Loads a material
   virtual LoadInfo LoadMaterial(const AssetID& asset_id, MaterialData* data) = 0;

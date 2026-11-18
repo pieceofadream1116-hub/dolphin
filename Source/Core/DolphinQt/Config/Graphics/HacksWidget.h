@@ -9,7 +9,6 @@ class ConfigBool;
 class ConfigSlider;
 class ConfigSliderLabel;
 class GraphicsPane;
-class QString;
 
 namespace Config
 {
@@ -23,15 +22,6 @@ public:
   explicit HacksWidget(GraphicsPane* gfx_pane);
 
 private:
-  void CreateWidgets();
-  void ConnectWidgets();
-  void AddDescriptions();
-
-  void UpdateGPUTextureDecodingEnabled(const QString& backend_name);
-  void UpdateBoundingBoxEnabled(const QString& backend_name);
-  void UpdateDeferEFBCopiesEnabled();
-  void UpdateSkipPresentingDuplicateFramesEnabled();
-
   void OnBackendChanged(const QString& backend_name);
 
   // EFB
@@ -58,4 +48,11 @@ private:
   ConfigBool* m_save_texture_cache_state;
 
   Config::Layer* m_game_layer = nullptr;
+
+  void CreateWidgets();
+  void ConnectWidgets();
+  void AddDescriptions();
+
+  void UpdateDeferEFBCopiesEnabled();
+  void UpdateSkipPresentingDuplicateFramesEnabled();
 };

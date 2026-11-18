@@ -8,7 +8,9 @@
 #include <cstring>
 
 #include "Common/Crypto/bn.h"
+#include "Common/Inline.h"
 #include "Common/Random.h"
+#include "Common/StringUtil.h"
 
 namespace Common::ec
 {
@@ -133,7 +135,7 @@ static Elt operator/(const Elt& dividend, const Elt& divisor)
 struct Point
 {
   Point() = default;
-  constexpr explicit Point(Elt x, Elt y) : m_data{{x, y}} {}
+  constexpr explicit Point(Elt x, Elt y) : m_data{{std::move(x), std::move(y)}} {}
   explicit Point(const u8* data) { std::copy_n(data, sizeof(m_data), Data()); }
 
   bool IsZero() const { return X().IsZero() && Y().IsZero(); }

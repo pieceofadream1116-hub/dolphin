@@ -31,8 +31,6 @@
 
 namespace
 {
-std::string SOURCE = "Android";
-
 jclass s_list_class;
 jmethodID s_list_get;
 jmethodID s_list_size;
@@ -69,7 +67,6 @@ jmethodID s_controller_interface_unregister_input_device_listener;
 jmethodID s_controller_interface_get_vibrator_manager;
 jmethodID s_controller_interface_get_system_vibrator_manager;
 jmethodID s_controller_interface_vibrate;
-jmethodID s_controller_interface_cancel_vibration;
 
 jclass s_sensor_event_listener_class;
 jmethodID s_sensor_event_listener_constructor;
@@ -457,7 +454,7 @@ void RegisterDevicesChangedCallbackIfNeeded(JNIEnv* env, jclass controller_inter
   const jmethodID controller_interface_on_devices_changed =
       env->GetStaticMethodID(global_controller_interface_class, "onDevicesChanged", "()V");
 
-  static Common::EventHook event_hook = g_controller_interface.RegisterDevicesChangedCallback(
+  g_controller_interface.RegisterDevicesChangedCallback(
       [global_controller_interface_class, controller_interface_on_devices_changed] {
         IDCache::GetEnvForThread()->CallStaticVoidMethod(global_controller_interface_class,
                                                          controller_interface_on_devices_changed);
@@ -471,13 +468,13 @@ namespace ciface::Android
 class InputBackend final : public ciface::InputBackend
 {
 public:
-  explicit InputBackend(ControllerInterface* controller_interface);
+  InputBackend(ControllerInterface* controller_interface);
   ~InputBackend();
   void PopulateDevices() override;
 
-  static void AddDevice(JNIEnv* env, int device_id);
-  static void AddSensorDevice(JNIEnv* env);
-  static void RemoveDevice(int device_id);
+private:
+  void AddDevice(JNIEnv* env, int device_id);
+  void AddSensorDevice(JNIEnv* env);
 };
 
 std::unique_ptr<ciface::InputBackend> CreateInputBackend(ControllerInterface* controller_interface)
@@ -585,14 +582,14 @@ private:
 class AndroidMotor : public Core::Device::Output
 {
 public:
-  AndroidMotor(JNIEnv* env, jobject vibrator, jint index)
-      : m_vibrator(env->NewGlobalRef(vibrator)), m_index(index)
+  AndroidMotor(JNIEnv* env, jobject vibrator, jint id)
+      : m_vibrator(env->NewGlobalRef(vibrator)), m_id(id)
   {
   }
 
   ~AndroidMotor() { IDCache::GetEnvForThread()->DeleteGlobalRef(m_vibrator); }
 
-  std::string GetName() const override { return "Motor " + std::to_string(m_index); }
+  std::string GetName() const override { return "Motor " + std::to_string(m_id); }
 
   void SetState(ControlState state) override
   {
@@ -603,27 +600,21 @@ public:
       IDCache::GetEnvForThread()->CallStaticVoidMethod(s_controller_interface_class,
                                                        s_controller_interface_vibrate, m_vibrator);
     }
-    else if (old_state >= 0.5 && state < 0.5)
-    {
-      IDCache::GetEnvForThread()->CallStaticVoidMethod(
-          s_controller_interface_class, s_controller_interface_cancel_vibration, m_vibrator);
-    }
   }
 
 private:
   const jobject m_vibrator;
-  const jint m_index;
+  const jint m_id;
   std::atomic<ControlState> m_state = 0;
 };
 
 class AndroidDevice final : public Core::Device
 {
 public:
-  AndroidDevice(JNIEnv* env, jint device_id, jobject input_device)
+  AndroidDevice(JNIEnv* env, jobject input_device)
       : m_sensor_event_listener(AddSensors(env, input_device)),
         m_source(env->CallIntMethod(input_device, s_input_device_get_sources)),
-        m_controller_number(env->CallIntMethod(input_device, s_input_device_get_controller_number)),
-        m_device_id(device_id)
+        m_controller_number(env->CallIntMethod(input_device, s_input_device_get_controller_number))
   {
     jstring j_name =
         reinterpret_cast<jstring>(env->CallObjectMethod(input_device, s_input_device_get_name));
@@ -640,7 +631,7 @@ public:
   // Constructor for the device added by Dolphin to contain sensor inputs
   AndroidDevice(JNIEnv* env, std::string name)
       : m_sensor_event_listener(AddSensors(env, nullptr)), m_source(AINPUT_SOURCE_SENSOR),
-        m_controller_number(0), m_device_id(std::nullopt), m_name(std::move(name))
+        m_controller_number(0), m_name(std::move(name))
   {
     AddSystemMotors(env);
   }
@@ -653,7 +644,7 @@ public:
 
   std::string GetName() const override { return m_name; }
 
-  std::string GetSource() const override { return SOURCE; }
+  std::string GetSource() const override { return "Android"; }
 
   std::optional<int> GetPreferredId() const override
   {
@@ -674,8 +665,6 @@ public:
 
     return -3;
   }
-
-  std::optional<jint> GetDeviceID() const { return m_device_id; }
 
   jobject GetSensorEventListener() { return m_sensor_event_listener; }
 
@@ -799,8 +788,8 @@ private:
     jint size = env->GetArrayLength(j_vibrator_ids);
     for (jint i = 0; i < size; ++i)
     {
-      jobject vibrator = env->CallObjectMethod(
-          vibrator_manager, s_dolphin_vibrator_manager_get_vibrator, vibrator_ids[i]);
+      jobject vibrator =
+          env->CallObjectMethod(vibrator_manager, s_dolphin_vibrator_manager_get_vibrator, i);
       AddOutput(new AndroidMotor(env, vibrator, i));
       env->DeleteLocalRef(vibrator);
     }
@@ -812,7 +801,6 @@ private:
   const jobject m_sensor_event_listener;
   const int m_source;
   const int m_controller_number;
-  const std::optional<jint> m_device_id;
   std::string m_name;
 };
 
@@ -898,8 +886,6 @@ InputBackend::InputBackend(ControllerInterface* controller_interface)
       "()Lorg/dolphinemu/dolphinemu/features/input/model/DolphinVibratorManager;");
   s_controller_interface_vibrate =
       env->GetStaticMethodID(s_controller_interface_class, "vibrate", "(Landroid/os/Vibrator;)V");
-  s_controller_interface_cancel_vibration = env->GetStaticMethodID(
-      s_controller_interface_class, "cancelVibration", "(Landroid/os/Vibrator;)V");
   env->DeleteLocalRef(controller_interface_class);
 
   const jclass sensor_event_listener_class =
@@ -958,12 +944,8 @@ InputBackend::~InputBackend()
   env->DeleteGlobalRef(s_keycodes_array);
 }
 
-void InputBackend::AddDevice(JNIEnv* env, jint device_id)
+void InputBackend::AddDevice(JNIEnv* env, int device_id)
 {
-  // Remove the device in case it already exists (maybe it's possible for a device to connect,
-  // be processed by PopulateDevices, and then be processed by onInputDeviceAdded)
-  RemoveDevice(device_id);
-
   jobject input_device =
       env->CallStaticObjectMethod(s_input_device_class, s_input_device_get_device, device_id);
 
@@ -973,14 +955,14 @@ void InputBackend::AddDevice(JNIEnv* env, jint device_id)
     return;
   }
 
-  auto device = std::make_shared<AndroidDevice>(env, device_id, input_device);
+  auto device = std::make_shared<AndroidDevice>(env, input_device);
 
   env->DeleteLocalRef(input_device);
 
   if (device->Inputs().empty() && device->Outputs().empty())
     return;
 
-  g_controller_interface.AddDevice(device);
+  GetControllerInterface().AddDevice(device);
 
   Core::DeviceQualifier qualifier;
   qualifier.FromDevice(device.get());
@@ -1005,7 +987,7 @@ void InputBackend::AddSensorDevice(JNIEnv* env)
   if (device->Inputs().empty() && device->Outputs().empty())
     return;
 
-  g_controller_interface.AddDevice(device);
+  GetControllerInterface().AddDevice(device);
 
   Core::DeviceQualifier qualifier;
   qualifier.FromDevice(device.get());
@@ -1016,16 +998,6 @@ void InputBackend::AddSensorDevice(JNIEnv* env)
   env->CallVoidMethod(device->GetSensorEventListener(),
                       s_sensor_event_listener_set_device_qualifier, j_qualifier);
   env->DeleteLocalRef(j_qualifier);
-}
-
-void InputBackend::RemoveDevice(jint device_id)
-{
-  g_controller_interface.RemoveDevice([device_id](const ciface::Core::Device* device) {
-    return device->GetSource() == SOURCE &&
-           static_cast<const AndroidDevice*>(device)->GetDeviceID() == device_id;
-  });
-
-  s_device_id_to_device_qualifier.erase(device_id);
 }
 
 void InputBackend::PopulateDevices()
@@ -1191,32 +1163,17 @@ Java_org_dolphinemu_dolphinemu_features_input_model_ControllerInterface_notifySe
 }
 
 JNIEXPORT void JNICALL
-Java_org_dolphinemu_dolphinemu_features_input_model_ControllerInterface_00024InputDeviceListener_onInputDeviceAdded(
-    JNIEnv* env, jobject, jint device_id)
+Java_org_dolphinemu_dolphinemu_features_input_model_ControllerInterface_refreshDevices(JNIEnv* env,
+                                                                                       jclass)
 {
-  ciface::Android::InputBackend::AddDevice(env, device_id);
-}
-
-JNIEXPORT void JNICALL
-Java_org_dolphinemu_dolphinemu_features_input_model_ControllerInterface_00024InputDeviceListener_onInputDeviceRemoved(
-    JNIEnv*, jobject, jint device_id)
-{
-  ciface::Android::InputBackend::RemoveDevice(device_id);
-}
-
-JNIEXPORT void JNICALL
-Java_org_dolphinemu_dolphinemu_features_input_model_ControllerInterface_00024InputDeviceListener_onInputDeviceChanged(
-    JNIEnv* env, jobject, jint device_id)
-{
-  // AddDevice will automatically remove the existing device
-  ciface::Android::InputBackend::AddDevice(env, device_id);
+  g_controller_interface.RefreshDevices();
 }
 
 JNIEXPORT jobjectArray JNICALL
 Java_org_dolphinemu_dolphinemu_features_input_model_ControllerInterface_getAllDeviceStrings(
     JNIEnv* env, jclass)
 {
-  return SpanToJStringArray(env, g_controller_interface.GetAllDeviceStrings());
+  return VectorToJStringArray(env, g_controller_interface.GetAllDeviceStrings());
 }
 
 JNIEXPORT jobject JNICALL

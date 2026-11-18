@@ -16,6 +16,7 @@
 #include <sys/select.h>
 #endif
 
+#include "Common/BitUtils.h"
 #include "Common/FileUtil.h"
 #include "Common/IOFile.h"
 #include "Common/Network.h"
@@ -117,12 +118,10 @@ s32 WiiSockMan::GetNetErrorCode(s32 ret, std::string_view caller, bool is_rw)
     return ret;
   }
 
-  const s32 return_value = TranslateErrorCode(error_code, is_rw);
-  const auto level =
-      return_value == -SO_EAGAIN ? Common::Log::LogLevel::LINFO : Common::Log::LogLevel::LERROR;
-  GENERIC_LOG_FMT(Common::Log::LogType::IOS_NET, level, "{} failed with error {}: {}, ret = {}",
-                  caller, error_code, Common::DecodeNetworkError(error_code), ret);
+  ERROR_LOG_FMT(IOS_NET, "{} failed with error {}: {}, ret= {}", caller, error_code,
+                Common::DecodeNetworkError(error_code), ret);
 
+  const s32 return_value = TranslateErrorCode(error_code, is_rw);
   SetLastNetError(return_value);
 
   return return_value;
@@ -852,14 +851,14 @@ void WiiSocket::ResetTimeout()
   timeout.reset();
 }
 
-void WiiSocket::DoSock(const Request& request, NET_IOCTL type)
+void WiiSocket::DoSock(Request request, NET_IOCTL type)
 {
   sockop so = {request, false};
   so.net_type = type;
   pending_sockops.push_back(so);
 }
 
-void WiiSocket::DoSock(const Request& request, SSL_IOCTL type)
+void WiiSocket::DoSock(Request request, SSL_IOCTL type)
 {
   sockop so = {request, true};
   so.ssl_type = type;
@@ -895,7 +894,11 @@ s32 WiiSockMan::AddSocket(s32 fd, bool is_rw)
     sock.SetWiiFd(wii_fd);
     m_ios.GetSystem().GetPowerPC().GetDebugInterface().NetworkLogger()->OnNewSocket(fd);
 
-    Common::SetPlatformSocketOptions(fd);
+#ifdef __APPLE__
+    int opt_no_sigpipe = 1;
+    if (setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &opt_no_sigpipe, sizeof(opt_no_sigpipe)) < 0)
+      ERROR_LOG_FMT(IOS_NET, "Failed to set SO_NOSIGPIPE on socket");
+#endif
 
     // Wii UDP sockets can use broadcast address by default
     if (!is_rw)
@@ -1050,7 +1053,7 @@ void WiiSockMan::UpdatePollCommands()
   if (pending_polls.empty())
     return;
 
-  const auto now = Clock::now();
+  const auto now = std::chrono::high_resolution_clock::now();
   const auto elapsed_d = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_time);
   const auto elapsed = elapsed_d.count();
   last_time = now;

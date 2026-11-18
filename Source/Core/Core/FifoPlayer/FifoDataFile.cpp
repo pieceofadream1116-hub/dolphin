@@ -12,12 +12,11 @@
 #include "Common/IOFile.h"
 #include "Common/MsgHandler.h"
 #include "Core/Config/MainSettings.h"
-#include "Core/ConfigManager.h"
 #include "Core/HW/Memmap.h"
 #include "Core/System.h"
 
 constexpr u32 FILE_ID = 0x0d01f1f0;
-constexpr u32 VERSION_NUMBER = 6;
+constexpr u32 VERSION_NUMBER = 5;
 constexpr u32 MIN_LOADER_VERSION = 1;
 // This value is only used if the DFF file was created with overridden RAM sizes.
 // If the MIN_LOADER_VERSION ever exceeds this, it's alright to remove it.
@@ -43,15 +42,13 @@ struct FileHeader
   u32 flags;
   u64 texMemOffset;
   u32 texMemSize;
-  // These are for overridden RAM sizes.  Otherwise the FIFO Player
+  // These are for overriden RAM sizes.  Otherwise the FIFO Player
   // will crash and burn with mismatched settings.  See PR #8722.
   u32 mem1_size;
   u32 mem2_size;
-  char gameid[8];
-  u8 reserved[24];
+  u8 reserved[32];
 };
 static_assert(sizeof(FileHeader) == 128, "FileHeader should be 128 bytes");
-static_assert(DEFAULT_GAME_ID.size() == sizeof(FileHeader::gameid), "Default game id size changed");
 
 struct FileFrameInfo
 {
@@ -139,9 +136,8 @@ bool FifoDataFile::Save(const std::string& filename)
   FileHeader header;
   header.fileId = FILE_ID;
   header.file_version = VERSION_NUMBER;
-  // Maintain backwards compatibility so long as the RAM sizes aren't overridden.
-  if (Config::Get(Config::MAIN_RAM_OVERRIDE_ENABLE) ||
-      SConfig::GetInstance().GetSimulatedMemorySize() > Memory::MEM1_SIZE_RETAIL)
+  // Maintain backwards compatability so long as the RAM sizes aren't overridden.
+  if (Config::Get(Config::MAIN_RAM_OVERRIDE_ENABLE))
     header.min_loader_version = MIN_LOADER_VERSION_FOR_RAM_OVERRIDE;
   else
     header.min_loader_version = MIN_LOADER_VERSION;
@@ -170,17 +166,6 @@ bool FifoDataFile::Save(const std::string& filename)
   auto& memory = system.GetMemory();
   header.mem1_size = memory.GetRamSizeReal();
   header.mem2_size = memory.GetExRamSizeReal();
-
-  const auto gameid = SConfig::GetInstance().GetGameID();
-  if (gameid.size() > DEFAULT_GAME_ID.size())
-  {
-    // Custom game id?  Won't fit, just use default
-    std::memcpy(header.gameid, DEFAULT_GAME_ID.data(), DEFAULT_GAME_ID.size());
-  }
-  else
-  {
-    std::strncpy(header.gameid, gameid.c_str(), DEFAULT_GAME_ID.size());
-  }
 
   file.Seek(0, File::SeekOrigin::Begin);
   file.WriteBytes(&header, sizeof(FileHeader));
@@ -267,17 +252,6 @@ std::unique_ptr<FifoDataFile> FifoDataFile::Load(const std::string& filename, bo
 
   dataFile->m_Flags = header.flags;
   dataFile->m_Version = header.file_version;
-
-  // Official support for game id was added in version 6
-  if (header.file_version < 6)
-  {
-    dataFile->m_game_id = DEFAULT_GAME_ID;
-  }
-  else
-  {
-    const size_t gameid_length = strnlen(header.gameid, DEFAULT_GAME_ID.size());
-    dataFile->m_game_id = std::string{header.gameid, gameid_length};
-  }
 
   if (flagsOnly)
   {
@@ -390,7 +364,8 @@ bool FifoDataFile::GetFlag(u32 flag) const
   return !!(m_Flags & flag);
 }
 
-u64 FifoDataFile::WriteMemoryUpdates(std::span<const MemoryUpdate> memUpdates, File::IOFile& file)
+u64 FifoDataFile::WriteMemoryUpdates(const std::vector<MemoryUpdate>& memUpdates,
+                                     File::IOFile& file)
 {
   // Add space for memory update list
   u64 updateListOffset = file.Tell();

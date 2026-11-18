@@ -3,12 +3,15 @@
 
 #include "InputCommon/ControllerEmu/ControlGroup/IMUCursor.h"
 
+#include <memory>
 #include <string>
 
 #include "Common/Common.h"
 #include "Common/MathUtil.h"
 
+#include "InputCommon/ControlReference/ControlReference.h"
 #include "InputCommon/ControllerEmu/Control/Control.h"
+#include "InputCommon/ControllerEmu/Control/Input.h"
 
 namespace ControllerEmu
 {
@@ -49,7 +52,7 @@ IMUCursor::IMUCursor(std::string name_, std::string ui_name_)
 
 ControlState IMUCursor::GetTotalYaw() const
 {
-  return MathUtil::DegreesToRadians(m_yaw_setting.GetValue());
+  return m_yaw_setting.GetValue() * MathUtil::TAU / 360;
 }
 
 ControlState IMUCursor::GetAccelWeight() const

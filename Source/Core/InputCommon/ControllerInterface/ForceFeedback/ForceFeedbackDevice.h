@@ -7,7 +7,7 @@
 #include <string>
 #include <thread>
 
-#include <windows.h>
+#include <Windows.h>
 
 #include "Common/Event.h"
 #include "Common/Flag.h"

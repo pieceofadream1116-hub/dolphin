@@ -12,7 +12,7 @@
 #ifdef __APPLE__
 #include <sys/sysctl.h>
 #elif defined(_WIN32)
-#include <windows.h>
+#include <Windows.h>
 #include <arm64intr.h>
 #include "Common/WindowsRegistry.h"
 #elif defined(__linux__)
@@ -154,9 +154,8 @@ static u32 ReadHwCap(u32 type)
 #if defined(__linux__)
   return getauxval(type);
 #elif defined(HAVE_ELF_AUX_INFO)
-  u_long hwcap;
-  if (elf_aux_info(type, &hwcap, sizeof(hwcap)) != 0)
-    hwcap = 0;
+  u_long hwcap = 0;
+  elf_aux_info(type, &hwcap, sizeof(hwcap));
   return hwcap;
 #endif
 }

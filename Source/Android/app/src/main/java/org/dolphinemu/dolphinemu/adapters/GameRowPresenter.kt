@@ -41,14 +41,14 @@ class GameRowPresenter : Presenter() {
         return TvGameViewHolder(gameCard)
     }
 
-    override fun onBindViewHolder(viewHolder: ViewHolder, item: Any?) {
+    override fun onBindViewHolder(viewHolder: ViewHolder, item: Any) {
         val holder = viewHolder as TvGameViewHolder
         val context = holder.cardParent.context
         val gameFile = item as GameFile
 
         holder.apply {
             imageScreenshot.setImageDrawable(null)
-            cardParent.titleText = gameFile.getTitle(GameFileCacheManager.getTitleDatabase())
+            cardParent.titleText = gameFile.getTitle()
             holder.gameFile = gameFile
 
             // Set the background color of the card

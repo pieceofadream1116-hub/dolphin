@@ -4,7 +4,6 @@
 #pragma once
 
 #include <optional>
-#include <span>
 #include <string>
 #include <vector>
 
@@ -54,7 +53,7 @@ std::optional<PatchEntry> DeserializeLine(std::string line);
 std::string SerializeLine(const PatchEntry& entry);
 void LoadPatchSection(const std::string& section, std::vector<Patch>* patches,
                       const Common::IniFile& globalIni, const Common::IniFile& localIni);
-void SavePatchSection(Common::IniFile* local_ini, std::span<const Patch> patches);
+void SavePatchSection(Common::IniFile* local_ini, const std::vector<Patch>& patches);
 void LoadPatches();
 
 void AddMemoryPatch(std::size_t index);

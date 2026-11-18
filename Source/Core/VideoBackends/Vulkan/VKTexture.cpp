@@ -378,7 +378,7 @@ void VKTexture::Load(u32 level, u32 width, u32 height, u32 row_length, const u8*
   // that lie outside of the texture's dimensions.
   const u32 upload_alignment = static_cast<u32>(g_vulkan_context->GetBufferImageGranularity());
   const u32 block_size = GetBlockSizeForFormat(GetFormat());
-  const u32 num_rows = Common::DivideRoundingUp(height, block_size);
+  const u32 num_rows = Common::AlignUp(height, block_size) / block_size;
   const u32 source_pitch = CalculateStrideForFormat(m_config.format, row_length);
   const u32 upload_size = source_pitch * num_rows;
   std::unique_ptr<StagingBuffer> temp_buffer;
@@ -465,8 +465,6 @@ void VKTexture::TransitionToLayout(VkCommandBuffer command_buffer, VkImageLayout
 {
   if (m_layout == new_layout)
     return;
-
-  m_written_since_last_layout_change = false;
 
   VkImageMemoryBarrier barrier = {
       VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,  // VkStructureType            sType
@@ -615,8 +613,6 @@ void VKTexture::TransitionToLayout(VkCommandBuffer command_buffer,
   if (m_compute_layout == new_layout)
     return;
 
-  m_written_since_last_layout_change = false;
-
   VkImageMemoryBarrier barrier = {
       VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,  // VkStructureType            sType
       nullptr,                                 // const void*                pNext
@@ -711,49 +707,6 @@ void VKTexture::TransitionToLayout(VkCommandBuffer command_buffer,
 
   vkCmdPipelineBarrier(command_buffer, srcStageMask, dstStageMask, 0, 0, nullptr, 0, nullptr, 1,
                        &barrier);
-}
-
-void VKTexture::PrepareForRenderPass(VkCommandBuffer command_buffer) const
-{
-  // Should only be used on images that are already in the layout for being rendered to
-  ASSERT(m_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL ||
-         m_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-  if (m_written_since_last_layout_change)
-  {
-    // If the image has already been written, we need a barrier to prevent WaW or RaW hazards.
-    VkPipelineStageFlags srcStage = 0;
-    VkPipelineStageFlags dstStage = 0;
-    VkImageMemoryBarrier barrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-    barrier.image = m_image;
-    barrier.oldLayout = m_layout;
-    barrier.newLayout = m_layout;
-    barrier.subresourceRange.aspectMask = GetImageAspectForFormat(GetFormat());
-    barrier.subresourceRange.layerCount = GetLayers();
-    barrier.subresourceRange.levelCount = GetLevels();
-    if (barrier.subresourceRange.aspectMask & VK_IMAGE_ASPECT_COLOR_BIT)
-    {
-      barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-      barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |  //
-                              VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
-      srcStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-      dstStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    }
-    else
-    {
-      barrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-      barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
-                              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
-      srcStage = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-      dstStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    }
-    vkCmdPipelineBarrier(command_buffer, srcStage, dstStage, 0,  //
-                         0, nullptr, 0, nullptr, 1, &barrier);
-  }
-  else
-  {
-    // Otherwise, it's about to be written right now.
-    m_written_since_last_layout_change = true;
-  }
 }
 
 VKStagingTexture::VKStagingTexture(PrivateTag, StagingTextureType type, const TextureConfig& config,
@@ -1164,34 +1117,25 @@ void VKFramebuffer::Unbind()
 
 void VKFramebuffer::TransitionForRender()
 {
-  VkCommandBuffer cb = g_command_buffer_mgr->GetCurrentCommandBuffer();
   if (m_color_attachment)
   {
     static_cast<VKTexture*>(m_color_attachment)
-        ->TransitionToLayout(cb, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        ->TransitionToLayout(g_command_buffer_mgr->GetCurrentCommandBuffer(),
+                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
   }
   for (auto* attachment : m_additional_color_attachments)
   {
     static_cast<VKTexture*>(attachment)
-        ->TransitionToLayout(cb, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        ->TransitionToLayout(g_command_buffer_mgr->GetCurrentCommandBuffer(),
+                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
   }
 
   if (m_depth_attachment)
   {
     static_cast<VKTexture*>(m_depth_attachment)
-        ->TransitionToLayout(cb, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+        ->TransitionToLayout(g_command_buffer_mgr->GetCurrentCommandBuffer(),
+                             VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
   }
-}
-
-void VKFramebuffer::PrepareForRenderPass()
-{
-  VkCommandBuffer cb = g_command_buffer_mgr->GetCurrentCommandBuffer();
-  if (m_color_attachment)
-    static_cast<VKTexture*>(m_color_attachment)->PrepareForRenderPass(cb);
-  if (m_depth_attachment)
-    static_cast<VKTexture*>(m_depth_attachment)->PrepareForRenderPass(cb);
-  for (auto* attachment : m_additional_color_attachments)
-    static_cast<VKTexture*>(attachment)->PrepareForRenderPass(cb);
 }
 
 void VKFramebuffer::SetAndClear(const VkRect2D& rect, const VkClearValue& color_value,

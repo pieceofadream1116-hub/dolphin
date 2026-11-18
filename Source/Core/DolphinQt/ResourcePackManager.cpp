@@ -3,8 +3,6 @@
 
 #include "DolphinQt/ResourcePackManager.h"
 
-#include <string>
-
 #include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QGridLayout>
@@ -17,7 +15,6 @@
 #include "DolphinQt/QtUtils/ModalMessageBox.h"
 #include "DolphinQt/QtUtils/NonDefaultQPushButton.h"
 #include "UICommon/ResourcePack/Manager.h"
-#include "UICommon/ResourcePack/ResourcePack.h"
 
 ResourcePackManager::ResourcePackManager(QWidget* widget) : QDialog(widget)
 {
@@ -165,7 +162,7 @@ void ResourcePackManager::RepopulateTable()
   SelectionChanged();
 }
 
-// Revert the indices as to be more intuitive for users
+// Revert the indicies as to be more intuitive for users
 int ResourcePackManager::GetResourcePackIndex(QTableWidgetItem* item) const
 {
   return m_table_widget->rowCount() - 1 - item->row();
@@ -246,12 +243,8 @@ void ResourcePackManager::Remove()
   if (box.exec() != QMessageBox::Yes)
     return;
 
-  ResourcePack::ResourcePack& selected_pack =
-      ResourcePack::GetPacks()[GetResourcePackIndex(items[0])];
-  const std::string selected_pack_path = selected_pack.GetPath();
   Uninstall();
-  ResourcePack::Remove(selected_pack);
-  File::Delete(selected_pack_path);
+  File::Delete(ResourcePack::GetPacks()[GetResourcePackIndex(items[0])].GetPath());
   RepopulateTable();
 }
 

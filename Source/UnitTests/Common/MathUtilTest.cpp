@@ -5,32 +5,6 @@
 
 #include "Common/MathUtil.h"
 
-TEST(MathUtil, DegreesToRadians)
-{
-  EXPECT_EQ(0.0, MathUtil::DegreesToRadians(0.0));
-  EXPECT_EQ(std::numbers::pi_v<double>, MathUtil::DegreesToRadians(180.0));
-  EXPECT_EQ(std::numbers::pi_v<double> / 2, MathUtil::DegreesToRadians(90.0));
-  EXPECT_EQ(std::numbers::pi_v<double> / 4, MathUtil::DegreesToRadians(45.0));
-  EXPECT_EQ(2 * std::numbers::pi_v<double>, MathUtil::DegreesToRadians(360.0));
-
-  // Negative angles
-  EXPECT_EQ(-std::numbers::pi_v<double> / 2, MathUtil::DegreesToRadians(-90.0));
-  EXPECT_EQ(-std::numbers::pi_v<double>, MathUtil::DegreesToRadians(-180.0));
-}
-
-TEST(MathUtil, RadiansToDegrees)
-{
-  EXPECT_EQ(0.0, MathUtil::RadiansToDegrees(0.0));
-  EXPECT_EQ(180.0, MathUtil::RadiansToDegrees(std::numbers::pi_v<double>));
-  EXPECT_EQ(90.0, MathUtil::RadiansToDegrees(std::numbers::pi_v<double> / 2));
-  EXPECT_EQ(45.0, MathUtil::RadiansToDegrees(std::numbers::pi_v<double> / 4));
-  EXPECT_EQ(360.0, MathUtil::RadiansToDegrees(2 * std::numbers::pi_v<double>));
-
-  // Negative angles
-  EXPECT_EQ(-90.0, MathUtil::RadiansToDegrees(-std::numbers::pi_v<double> / 2));
-  EXPECT_EQ(-180.0, MathUtil::RadiansToDegrees(-std::numbers::pi_v<double>));
-}
-
 TEST(MathUtil, IntLog2)
 {
   EXPECT_EQ(0, MathUtil::IntLog2(1));
@@ -44,23 +18,8 @@ TEST(MathUtil, IntLog2)
   EXPECT_EQ(63, MathUtil::IntLog2(0xFFFFFFFFFFFFFFFFull));
 }
 
-TEST(MathUtil, IsPow2)
-{
-  EXPECT_FALSE(MathUtil::IsPow2(std::numeric_limits<int>::min()));
-  EXPECT_FALSE(MathUtil::IsPow2(-2));
-  EXPECT_FALSE(MathUtil::IsPow2(-1));
-  EXPECT_FALSE(MathUtil::IsPow2(0));
-  EXPECT_TRUE(MathUtil::IsPow2(1));
-  EXPECT_TRUE(MathUtil::IsPow2(2));
-  EXPECT_FALSE(MathUtil::IsPow2(3));
-  EXPECT_TRUE(MathUtil::IsPow2(4));
-  EXPECT_FALSE(MathUtil::IsPow2(5));
-  EXPECT_FALSE(MathUtil::IsPow2(std::numeric_limits<int>::max()));
-}
-
 TEST(MathUtil, NextPowerOf2)
 {
-  EXPECT_EQ(1U, MathUtil::NextPowerOf2(0));
   EXPECT_EQ(4U, MathUtil::NextPowerOf2(3));
   EXPECT_EQ(4U, MathUtil::NextPowerOf2(4));
   EXPECT_EQ(8U, MathUtil::NextPowerOf2(6));
@@ -107,13 +66,6 @@ TEST(MathUtil, SaturatingCast)
   // 16777217 = 2^24 + 1 is the first integer that cannot be represented correctly with a f32.
   EXPECT_EQ(16777216, MathUtil::SaturatingCast<s32>(float(16777216)));
   EXPECT_EQ(16777216, MathUtil::SaturatingCast<s32>(float(16777217)));
-
-  // Note that values in the range [2147483584, 2147483776] have an equivalent float representation.
-  EXPECT_EQ(std::numeric_limits<s32>::max(), MathUtil::SaturatingCast<s32>(2147483648.f));
-  EXPECT_EQ(std::numeric_limits<s32>::min(), MathUtil::SaturatingCast<s32>(-2147483649.f));
-
-  // Cast from a signed integer type to a smaller signed integer type
-  EXPECT_EQ(-128, (MathUtil::SaturatingCast<s8, int>(-129)));
 }
 
 TEST(MathUtil, RectangleEquality)

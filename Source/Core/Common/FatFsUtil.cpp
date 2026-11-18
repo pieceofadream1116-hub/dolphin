@@ -4,6 +4,7 @@
 #include "Common/FatFsUtil.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <mutex>
 #include <string>
@@ -598,7 +599,7 @@ bool SyncSDFolderToSDImage(const std::function<bool()>& cancelled, bool determin
   return true;
 }
 
-static bool Unpack(const std::function<bool()>& cancelled, const std::string& path,
+static bool Unpack(const std::function<bool()>& cancelled, const std::string path,
                    bool is_directory, const char* name, std::vector<u8>& tmp_buffer)
 {
   if (cancelled())
@@ -719,7 +720,8 @@ static bool Unpack(const std::function<bool()>& cancelled, const std::string& pa
 
     // Check for path traversal attacks.
     const bool is_path_traversal_attack =
-        childname.contains('\\') || childname.contains('/') ||
+        (childname.find("\\") != std::string_view::npos) ||
+        (childname.find('/') != std::string_view::npos) ||
         std::ranges::all_of(childname, [](char c) { return c == '.'; });
     if (is_path_traversal_attack)
     {

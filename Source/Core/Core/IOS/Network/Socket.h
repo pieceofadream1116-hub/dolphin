@@ -4,8 +4,8 @@
 #pragma once
 
 #ifdef _WIN32
+#include <WinSock2.h>
 #include <iphlpapi.h>
-#include <winsock2.h>
 #include <ws2tcpip.h>
 
 typedef pollfd pollfd_t;
@@ -17,31 +17,42 @@ typedef pollfd pollfd_t;
 #elif defined(__linux__) or defined(__APPLE__) or defined(__FreeBSD__) or defined(__NetBSD__) or   \
     defined(__OpenBSD__) or defined(__HAIKU__)
 #include <arpa/inet.h>
-#include <fcntl.h>
-#include <net/if.h>
 #include <netdb.h>
-#include <netinet/in.h>
-#include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#if defined(ANDROID) || defined(__HAIKU__)
+#include <fcntl.h>
+#else
+#include <sys/fcntl.h>
+#endif
+#include <errno.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <poll.h>
+#include <string.h>
 
 typedef struct pollfd pollfd_t;
 #else
-#include <fcntl.h>
+#include <errno.h>
 #include <netinet/in.h>
+#include <sys/fcntl.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #endif
 
+#include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <list>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
 
 #include "Common/CommonTypes.h"
+#include "Common/EnumUtils.h"
 #include "Common/Logging/Log.h"
 #include "Core/HW/Memmap.h"
 #include "Core/IOS/IOS.h"
@@ -209,8 +220,8 @@ private:
   const Timeout& GetTimeout();
   void ResetTimeout();
 
-  void DoSock(const Request& request, NET_IOCTL type);
-  void DoSock(const Request& request, SSL_IOCTL type);
+  void DoSock(Request request, NET_IOCTL type);
+  void DoSock(Request request, SSL_IOCTL type);
   void Update(bool read, bool write, bool except);
   void UpdateConnectingState(s32 connect_rv);
   ConnectingState GetConnectingState() const;
@@ -280,7 +291,7 @@ public:
     if (socket_entry == WiiSockets.end())
     {
       ERROR_LOG_FMT(IOS_NET, "DoSock: Error, fd not found ({:08x}, {:08X}, {:08X})", sock,
-                    request.address, std::to_underlying(type));
+                    request.address, Common::ToUnderlying(type));
       EnqueueIPCReply(request, -SO_EBADF);
     }
     else
@@ -300,6 +311,7 @@ private:
   std::unordered_map<s32, WiiSocket> WiiSockets;
   s32 errno_last = 0;
   std::vector<PollCommand> pending_polls;
-  TimePoint last_time = Clock::now();
+  std::chrono::time_point<std::chrono::high_resolution_clock> last_time =
+      std::chrono::high_resolution_clock::now();
 };
 }  // namespace IOS::HLE

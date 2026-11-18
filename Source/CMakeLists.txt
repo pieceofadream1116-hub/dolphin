@@ -16,22 +16,9 @@ if(CMAKE_SYSTEM_NAME MATCHES "Windows")
 endif()
 
 if (NOT MSVC)
-  set(CMAKE_CXX_STANDARD 23)
+  set(CMAKE_CXX_STANDARD 20)
   set(CMAKE_CXX_STANDARD_REQUIRED ON)
   set(CMAKE_CXX_EXTENSIONS OFF)
-
-  # std::jthread is guarded behind -fexperimental-library prior to libc++ version 20
-  check_cxx_source_compiles([[
-  #include <version>
-  #if defined(_LIBCPP_VERSION) && _LIBCPP_VERSION < 200000
-  #error libc++ version < 20
-  #endif
-  int main() {}
-  ]] IS_JTHREAD_STABLE)
-
-  if(NOT IS_JTHREAD_STABLE)
-    add_compile_options(-fexperimental-library)
-  endif()
 endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -58,7 +45,6 @@ else()
   check_and_add_flag(INIT_SELF -Winit-self)
   check_and_add_flag(MISSING_DECLARATIONS -Wmissing-declarations)
   check_and_add_flag(MISSING_VARIABLE_DECLARATIONS -Wmissing-variable-declarations)
-  check_and_add_flag(IMPLICIT_FALLTHROUGH -Wimplicit-fallthrough)
 
   # Disable -Wstringop-truncation warnings as they result in many false positives.
   # In most (all?) cases where std::strncpy is used, we want to fill the entire buffer
@@ -74,13 +60,6 @@ else()
   if (HAS_FORMAT_WARNING)
     check_and_add_flag(FORMAT_WARNING_TO_ERROR -Werror=format)
   endif()
-
-  # Trigraphs support is generally disabled by default, but some compilers (GCC) may still warn when
-  # one hypothetical trigraph is encountered. The warning is generally not interesting.
-  check_cxx_compiler_flag(-Wtrigraphs HAS_TRIGRAPHS_WARNING)
-  if (HAS_TRIGRAPHS_WARNING)
-    check_and_add_flag(NO_TRIGRAPHS_WARNING -Wno-trigraphs)
-  endif()
 endif()
 
 # These aren't actually needed for C11/C++11
@@ -90,12 +69,7 @@ add_definitions(-D__STDC_CONSTANT_MACROS)
 
 check_symbol_exists(elf_aux_info sys/auxv.h HAVE_ELF_AUX_INFO)
 if(HAVE_ELF_AUX_INFO)
-  add_definitions(-DHAVE_ELF_AUX_INFO)
-endif()
-
-check_symbol_exists(getexecpath unistd.h HAVE_GETEXECPATH)
-if(HAVE_GETEXECPATH)
-  add_definitions(-DHAVE_GETEXECPATH)
+    add_definitions(-DHAVE_ELF_AUX_INFO)
 endif()
 
 add_subdirectory(Core)

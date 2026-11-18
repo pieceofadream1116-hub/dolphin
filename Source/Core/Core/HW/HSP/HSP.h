@@ -4,15 +4,16 @@
 #pragma once
 
 #include <memory>
-#include <span>
 
 #include "Common/CommonTypes.h"
-#include "Core/HW/HSP/HSP_Device.h"
 
 class PointerWrap;
 
 namespace HSP
 {
+class IHSPDevice;
+enum class HSPDeviceType : int;
+
 class HSPManager
 {
 public:
@@ -26,13 +27,14 @@ public:
   void Init();
   void Shutdown();
 
-  void Read(u32 address, std::span<u8, TRANSFER_SIZE> data);
-  void Write(u32 address, std::span<const u8, TRANSFER_SIZE> data);
+  u64 Read(u32 address);
+  void Write(u32 address, u64 value);
 
   void DoState(PointerWrap& p);
 
-  void SetDevice(std::unique_ptr<IHSPDevice> device);
-  void SetDevice(HSPDeviceType device);
+  void RemoveDevice();
+  void AddDevice(std::unique_ptr<IHSPDevice> device);
+  void AddDevice(HSPDeviceType device);
 
 private:
   std::unique_ptr<IHSPDevice> m_device;

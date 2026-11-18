@@ -3,7 +3,6 @@
 
 #include "Core/USBUtils.h"
 
-#include <array>
 #include <charconv>
 #include <cwchar>
 #include <functional>
@@ -14,6 +13,7 @@
 #include <vector>
 
 #include <fmt/format.h>
+#include <fmt/xchar.h>
 #ifdef HAVE_LIBUDEV
 #include <libudev.h>
 #endif
@@ -21,13 +21,9 @@
 #include <libusb.h>
 #endif
 #ifdef _WIN32
+#include <SetupAPI.h>
 #include <cfgmgr32.h>
 #include <devpkey.h>
-#include <initguid.h>
-// initguid.h must be included before usbiodef.h
-#include <usbiodef.h>
-
-#include <fmt/xchar.h>
 
 #include "Common/StringUtil.h"
 #include "Common/WindowsDevice.h"
@@ -123,36 +119,43 @@ static std::optional<std::string> GetDeviceNameUsingKnownDevices(u16 vid, u16 pi
 }
 
 #ifdef _WIN32
-static std::optional<std::string> GetDeviceNameUsingCfgMgr32(u16 vid, u16 pid)
+static std::optional<std::string> GetDeviceNameUsingSetupAPI(u16 vid, u16 pid)
 {
-  auto class_guid = GUID_DEVINTERFACE_USB_DEVICE;
-  const ULONG flags = CM_GET_DEVICE_INTERFACE_LIST_PRESENT;
+  std::optional<std::string> device_name;
   const std::wstring filter = fmt::format(L"VID_{:04X}&PID_{:04X}", vid, pid);
 
-  for (auto* iface : Common::GetDeviceInterfaceList(&class_guid, nullptr, flags))
+  HDEVINFO dev_info =
+      SetupDiGetClassDevs(nullptr, nullptr, nullptr, DIGCF_PRESENT | DIGCF_ALLCLASSES);
+  if (dev_info == INVALID_HANDLE_VALUE)
+    return std::nullopt;
+  SP_DEVINFO_DATA dev_info_data;
+  dev_info_data.cbSize = sizeof(SP_DEVINFO_DATA);
+
+  for (DWORD i = 0; SetupDiEnumDeviceInfo(dev_info, i, &dev_info_data); ++i)
   {
-    if (!std::basic_string_view{iface}.contains(filter))
+    TCHAR instance_id[MAX_DEVICE_ID_LEN];
+    if (CM_Get_Device_ID(dev_info_data.DevInst, instance_id, MAX_DEVICE_ID_LEN, 0) != CR_SUCCESS)
       continue;
 
-    auto dev_inst_id = Common::GetDeviceInterfaceStringProperty(iface, &DEVPKEY_Device_InstanceId);
-    if (!dev_inst_id.has_value())
-      return std::nullopt;
+    const std::wstring_view id_wstr(instance_id);
+    if (id_wstr.find(filter) == std::wstring::npos)
+      continue;
 
-    DEVINST dev_inst{};
-    if (CM_Locate_DevNode(&dev_inst, dev_inst_id->data(), CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS)
+    std::wstring property_value =
+        Common::GetDeviceProperty(dev_info, &dev_info_data, &DEVPKEY_Device_FriendlyName);
+    if (property_value.empty())
     {
-      ERROR_LOG_FMT(COMMON, "CM_Locate_DevNode");
-      return std::nullopt;
+      property_value =
+          Common::GetDeviceProperty(dev_info, &dev_info_data, &DEVPKEY_Device_DeviceDesc);
     }
 
-    // FYI: BusReportedDeviceDesc seems to be more of a friendly name
-    //  while DeviceDesc tends to be something more like "USB Input Device".
-    return Common::GetDevNodeStringProperty(dev_inst, &DEVPKEY_Device_BusReportedDeviceDesc)
-        .or_else(std::bind(Common::GetDevNodeStringProperty, dev_inst, &DEVPKEY_Device_DeviceDesc))
-        .transform(WStringToUTF8);
+    if (!property_value.empty())
+      device_name = WStringToUTF8(property_value);
+    break;
   }
 
-  return std::nullopt;
+  SetupDiDestroyDeviceInfoList(dev_info);
+  return device_name;
 }
 #endif
 
@@ -242,7 +245,7 @@ std::optional<std::string> GetDeviceNameFromVIDPID(u16 vid, u16 pid)
       &GetDeviceNameUsingHWDB,
 #endif
 #ifdef _WIN32
-      &GetDeviceNameUsingCfgMgr32,
+      &GetDeviceNameUsingSetupAPI,
 #endif
 #if defined(__LIBUSB__) && !defined(_WIN32)
       &GetDeviceNameUsingLibUSB,

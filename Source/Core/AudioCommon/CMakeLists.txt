@@ -3,8 +3,6 @@ add_library(audiocommon
   AudioCommon.h
   CubebStream.h
   Enums.h
-  Microphone.cpp
-  Microphone.h
   Mixer.cpp
   Mixer.h
   SurroundDecoder.cpp

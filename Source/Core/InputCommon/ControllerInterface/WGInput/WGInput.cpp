@@ -187,7 +187,13 @@ public:
       AddInput(new Battery(&m_battery_level));
   }
 
-  int GetSortPriority() const override { return -1; }
+  int GetSortPriority() const override {
+#ifdef WINRT_XBOX
+    return 1;
+#else
+    return -1;
+#endif
+  }
 
   const WGI::RawGameController GetRawGameController() const { return m_raw_controller; }
 
@@ -328,7 +334,7 @@ private:
       if (m_switch == WGI::GameControllerSwitchPosition::Center)
         return 0.0;
 
-      // All of the "in between" states (e.g. Up-Right) are one-off from the four cardinal
+      // All of the "inbetween" states (e.g. Up-Right) are one-off from the four cardinal
       // directions. This tests that the current switch state value is within 1 of the desired
       // state.
       const auto direction_diff = std::abs(static_cast<int32_t>(m_switch) - m_direction);

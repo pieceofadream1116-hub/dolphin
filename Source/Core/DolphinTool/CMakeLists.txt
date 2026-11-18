@@ -11,14 +11,7 @@ add_executable(dolphin-tool
   ToolMain.cpp
 )
 
-if (WIN32)
-  target_sources(dolphin-tool PRIVATE DolphinTool.exe.manifest DolphinTool.rc)
-
-  set_target_properties(dolphin-tool PROPERTIES
-    DEBUG_POSTFIX    D
-    OUTPUT_NAME      DolphinTool
-  )
-endif()
+set_target_properties(dolphin-tool PROPERTIES OUTPUT_NAME dolphin-tool)
 
 target_link_libraries(dolphin-tool
 PRIVATE
@@ -33,17 +26,5 @@ if(MSVC)
   target_link_libraries(dolphin-tool PRIVATE use_pch)
 endif()
 
-if(APPLE)
-  if(MACOS_CODE_SIGNING)
-    add_custom_command(TARGET dolphin-tool
-      POST_BUILD
-      COMMAND "${CMAKE_SOURCE_DIR}/Tools/mac-codesign.sh"
-      "${MACOS_CODE_SIGNING_IDENTITY}"
-      "$<TARGET_FILE:dolphin-tool>")
-  endif()
-endif()
-
 set(CPACK_PACKAGE_EXECUTABLES ${CPACK_PACKAGE_EXECUTABLES} dolphin-tool)
-if (NOT WIN32)
-  install(TARGETS dolphin-tool RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-endif()
+install(TARGETS dolphin-tool RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

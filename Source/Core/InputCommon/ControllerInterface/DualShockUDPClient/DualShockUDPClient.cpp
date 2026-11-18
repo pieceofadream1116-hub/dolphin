@@ -20,6 +20,7 @@
 #include "Common/ScopeGuard.h"
 #include "Common/StringUtil.h"
 #include "Common/Thread.h"
+#include "Core/CoreTiming.h"
 #include "InputCommon/ControllerInterface/ControllerInterface.h"
 #include "InputCommon/ControllerInterface/DualShockUDPClient/DualShockUDPProto.h"
 #include "SFML/Network/IpAddress.hpp"
@@ -179,7 +180,7 @@ struct Server
     m_description = std::move(other.m_description);
     m_address = std::move(other.m_address);
     m_port = other.m_port;
-    m_port_info = other.m_port_info;
+    m_port_info = std::move(other.m_port_info);
   }
 
   Server& operator=(const Server&) = delete;
@@ -260,18 +261,11 @@ void InputBackend::HotplugThreadFunc()
         list_ports.pad_request_count = SERVER_ASKED_PADS;
         list_ports.pad_ids = {0, 1, 2, 3};
         msg.Finish();
-        if (std::optional<sf::IpAddress> server_ip = sf::IpAddress::resolve(server.m_address))
+        if (server.m_socket.send(&list_ports, sizeof list_ports,
+                                 sf::IpAddress::resolve(server.m_address).value(),
+                                 server.m_port) != sf::Socket::Status::Done)
         {
-          if (server.m_socket.send(&list_ports, sizeof list_ports, *server_ip, server.m_port) !=
-              sf::Socket::Status::Done)
-          {
-            ERROR_LOG_FMT(CONTROLLERINTERFACE, "DualShockUDPClient HotplugThreadFunc send failed");
-          }
-        }
-        else
-        {
-          ERROR_LOG_FMT(CONTROLLERINTERFACE, "DualShockUDPClient failed to resolve {}",
-                        server.m_address);
+          ERROR_LOG_FMT(CONTROLLERINTERFACE, "DualShockUDPClient HotplugThreadFunc send failed");
         }
         timed_out_servers[i] = true;
       }
@@ -574,7 +568,7 @@ Device::Device(std::string name, int index, std::string server_address, u16 serv
   AddInput(new AccelerometerInput("Accel Backward", m_pad_data.accelerometer_z_g, -accel_scale));
 
   // Convert degrees per second to radians per second
-  constexpr auto gyro_scale = MathUtil::RadiansToDegrees(1.0);
+  constexpr auto gyro_scale = 360.0 / MathUtil::TAU;
 
   AddInput(new GyroInput("Gyro Pitch Up", m_pad_data.gyro_pitch_deg_s, gyro_scale));
   AddInput(new GyroInput("Gyro Pitch Down", m_pad_data.gyro_pitch_deg_s, -gyro_scale));

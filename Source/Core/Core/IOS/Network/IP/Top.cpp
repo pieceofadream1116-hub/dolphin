@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -20,10 +21,12 @@
 #include <fmt/format.h>
 
 #include "Common/Assert.h"
+#include "Common/BitUtils.h"
 #include "Common/CommonTypes.h"
 #include "Common/Logging/Log.h"
 #include "Common/Network.h"
 #include "Common/ScopeGuard.h"
+#include "Common/StringUtil.h"
 
 #include "Core/Core.h"
 #include "Core/HW/Memmap.h"
@@ -46,6 +49,7 @@
 #include <netinet/in.h>
 #include <resolv.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <unistd.h>
 #endif
 
@@ -58,12 +62,6 @@
 #include <linux/rtnetlink.h>
 #endif
 
-auto format_as(addrinfo hints)
-{
-  return fmt::format("flags={}, family={}, socktype={}, protocol={}, addrlen={}", hints.ai_flags,
-                     hints.ai_family, hints.ai_socktype, hints.ai_protocol, hints.ai_addrlen);
-}
-
 namespace IOS::HLE
 {
 enum SOResultCode : s32
@@ -72,25 +70,10 @@ enum SOResultCode : s32
   SO_ERROR_HOST_NOT_FOUND = -305,
 };
 
-namespace
-{
-const char* GaiStrError(s32 error)
-{
-#ifdef _WIN32
-  // gai_strerror isn't thread safe on Windows
-  return Common::DecodeNetworkError(error);
-#else
-  // Unlike Windows it doesn't return regular error codes
-  // e.g. EAI_AGAIN vs errno's EAGAIN
-  return gai_strerror(error);
-#endif
-}
-}  // namespace
-
 NetIPTopDevice::NetIPTopDevice(EmulationKernel& ios, const std::string& device_name)
     : EmulationDevice(ios, device_name)
 {
-  m_work_queue.Reset("Network Worker", [this](const AsyncTask& task) {
+  m_work_queue.Reset("Network Worker", [this](AsyncTask task) {
     const IPCReply reply = task.handler();
     {
       std::lock_guard lg(m_async_reply_lock);
@@ -405,7 +388,7 @@ static std::optional<DefaultInterface> GetSystemDefaultInterface()
   const u32 prefix_length = GetNetworkPrefixLength();
   const u32 netmask = (1 << prefix_length) - 1;
   const u32 gateway = GetNetworkGateway();
-  // this isn't fully correct, but this will make calls to get the routing table at least return the
+  // this isnt fully correct, but this will make calls to get the routing table at least return the
   // gateway
   if (routing_table.empty())
     routing_table = {{0, 0, 0, gateway}};
@@ -450,7 +433,7 @@ static std::optional<DefaultInterface> GetSystemDefaultInterface()
     if (iface->ifa_addr && iface->ifa_addr->sa_family == AF_INET &&
         get_addr(iface->ifa_addr).s_addr == default_interface_address->s_addr)
     {
-      // this isn't fully correct, but this will make calls to get the routing table at least return
+      // this isnt fully correct, but this will make calls to get the routing table at least return
       // the gateway
       if (routing_table.empty())
         routing_table = {{0, {}, {}, get_addr(iface->ifa_dstaddr)}};
@@ -513,7 +496,7 @@ std::optional<IPCReply> NetIPTopDevice::IOCtl(const IOCtlRequest& request)
   case IOCTL_SO_GETHOSTID:
     return HandleGetHostIDRequest(request);
   case IOCTL_SO_INETATON:
-    return LaunchAsyncTask(&NetIPTopDevice::HandleInetAToNRequest, request);
+    return HandleInetAToNRequest(request);
   case IOCTL_SO_INETPTON:
     return HandleInetPToNRequest(request);
   case IOCTL_SO_INETNTOP:
@@ -751,7 +734,7 @@ IPCReply NetIPTopDevice::HandleGetSockNameRequest(const IOCtlRequest& request)
 
   request.Log(GetDeviceName(), Common::Log::LogType::IOS_WC24);
 
-  sockaddr sa{};
+  sockaddr sa;
   socklen_t sa_len = sizeof(sa);
   const int ret =
       getsockname(GetEmulationKernel().GetSocketManager()->GetHostSocket(fd), &sa, &sa_len);
@@ -779,7 +762,7 @@ IPCReply NetIPTopDevice::HandleGetPeerNameRequest(const IOCtlRequest& request)
 
   u32 fd = memory.Read_U32(request.buffer_in);
 
-  sockaddr sa{};
+  sockaddr sa;
   socklen_t sa_len = sizeof(sa);
   const int ret =
       getpeername(GetEmulationKernel().GetSocketManager()->GetHostSocket(fd), &sa, &sa_len);
@@ -803,8 +786,8 @@ IPCReply NetIPTopDevice::HandleGetPeerNameRequest(const IOCtlRequest& request)
 
 IPCReply NetIPTopDevice::HandleGetHostIDRequest(const IOCtlRequest& request)
 {
-  const DefaultInterface net_interface = GetSystemDefaultInterfaceOrFallback();
-  const u32 host_ip = ntohl(net_interface.inet.s_addr);
+  const DefaultInterface interface = GetSystemDefaultInterfaceOrFallback();
+  const u32 host_ip = ntohl(interface.inet.s_addr);
   INFO_LOG_FMT(IOS_NET, "IOCTL_SO_GETHOSTID = {}.{}.{}.{}", host_ip >> 24, (host_ip >> 16) & 0xFF,
                (host_ip >> 8) & 0xFF, host_ip & 0xFF);
   return IPCReply(host_ip);
@@ -1176,10 +1159,10 @@ IPCReply NetIPTopDevice::HandleGetInterfaceOptRequest(const IOCtlVRequest& reque
     // XXX: this isn't exactly right; the buffer can be larger than 12 bytes,
     // in which case, depending on some interface settings, SO can write 12 more bytes
     memory.Write_U32(0xC, request.io_vectors[1].address);
-    const DefaultInterface net_interface = GetSystemDefaultInterfaceOrFallback();
-    memory.Write_U32(ntohl(net_interface.inet.s_addr), request.io_vectors[0].address);
-    memory.Write_U32(ntohl(net_interface.netmask.s_addr), request.io_vectors[0].address + 4);
-    memory.Write_U32(ntohl(net_interface.broadcast.s_addr), request.io_vectors[0].address + 8);
+    const DefaultInterface interface = GetSystemDefaultInterfaceOrFallback();
+    memory.Write_U32(ntohl(interface.inet.s_addr), request.io_vectors[0].address);
+    memory.Write_U32(ntohl(interface.netmask.s_addr), request.io_vectors[0].address + 4);
+    memory.Write_U32(ntohl(interface.broadcast.s_addr), request.io_vectors[0].address + 8);
     break;
   }
 
@@ -1191,8 +1174,8 @@ IPCReply NetIPTopDevice::HandleGetInterfaceOptRequest(const IOCtlVRequest& reque
 
   case 0x4006:  // get routing table
   {
-    const DefaultInterface net_interface = GetSystemDefaultInterfaceOrFallback();
-    for (InterfaceRouting route : net_interface.routing_table)
+    const DefaultInterface interface = GetSystemDefaultInterfaceOrFallback();
+    for (InterfaceRouting route : interface.routing_table)
     {
       memory.Write_U32(ntohl(route.destination.s_addr), request.io_vectors[0].address + param5);
       memory.Write_U32(ntohl(route.netmask.s_addr), request.io_vectors[0].address + param5 + 4);
@@ -1302,10 +1285,10 @@ IPCReply NetIPTopDevice::HandleGetAddressInfoRequest(const IOCtlVRequest& reques
 
   addrinfo* result = nullptr;
   int ret = getaddrinfo(pNodeName, pServiceName, hints_valid ? &hints : nullptr, &result);
+  u32 addr = request.io_vectors[0].address;
+  u32 sockoffset = addr + 0x460;
   if (ret == 0)
   {
-    u32 addr = request.io_vectors[0].address;
-    u32 sockoffset = addr + 0x460;
     constexpr size_t WII_ADDR_INFO_SIZE = 0x20;
     for (addrinfo* result_iter = result; result_iter != nullptr; result_iter = result_iter->ai_next)
     {
@@ -1347,15 +1330,6 @@ IPCReply NetIPTopDevice::HandleGetAddressInfoRequest(const IOCtlVRequest& reques
   }
   else
   {
-    const char* const hostname = pNodeName ? pNodeName : "(null)";
-    const char* const service = pServiceName ? pServiceName : "(null)";
-    const std::string hints_description{hints_valid ? fmt::format("{}", hints) : "(null)"};
-    ERROR_LOG_FMT(IOS_NET,
-                  "getaddrinfo failed with error {}: {}\n"
-                  " - hostname: {}\n"
-                  " - service: {}\n"
-                  " - hints: {}",
-                  ret, GaiStrError(ret), hostname, service, hints_description);
     ret = SO_ERROR_HOST_NOT_FOUND;
   }
 

@@ -3,6 +3,7 @@
 
 #include "VideoCommon/Assets/MeshAsset.h"
 
+#include <algorithm>
 #include <array>
 #include <utility>
 
@@ -10,6 +11,7 @@
 
 #include "Common/IOFile.h"
 #include "Common/Logging/Log.h"
+#include "Common/StringUtil.h"
 #include "VideoCommon/Assets/CustomAssetLibrary.h"
 
 namespace VideoCommon

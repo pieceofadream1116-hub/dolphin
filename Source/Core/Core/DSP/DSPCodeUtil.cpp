@@ -4,7 +4,7 @@
 #include "Core/DSP/DSPCodeUtil.h"
 
 #include <algorithm>
-#include <span>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -13,7 +13,9 @@
 #include "Common/CommonTypes.h"
 #include "Common/FileUtil.h"
 #include "Common/IOFile.h"
+#include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
+#include "Common/StringUtil.h"
 #include "Common/Swap.h"
 
 #include "Core/DSP/DSPAssembler.h"
@@ -36,7 +38,7 @@ bool Assemble(const std::string& text, std::vector<u16>& code, bool force)
   return assembler.Assemble(text, code);
 }
 
-bool Disassemble(std::span<const u16> code, bool line_numbers, std::string& text)
+bool Disassemble(const std::vector<u16>& code, bool line_numbers, std::string& text)
 {
   if (code.empty())
     return false;
@@ -57,7 +59,7 @@ bool Disassemble(std::span<const u16> code, bool line_numbers, std::string& text
 
 // NOTE: This code is called from DSPTool and UnitTests, which do not use the logging system.
 // Thus, fmt::print is used instead of the log system.
-bool Compare(std::span<const u16> code1, std::span<const u16> code2)
+bool Compare(const std::vector<u16>& code1, const std::vector<u16>& code2)
 {
   if (code1.size() != code2.size())
     fmt::print("Size difference! 1={} 2={}\n", code1.size(), code2.size());
@@ -107,7 +109,7 @@ bool Compare(std::span<const u16> code1, std::span<const u16> code2)
   if (code2.size() != code1.size())
   {
     fmt::print("Extra code words:\n");
-    const auto longest = code1.size() > code2.size() ? code1 : code2;
+    const std::vector<u16>& longest = code1.size() > code2.size() ? code1 : code2;
     for (u16 i = min_size; i < longest.size(); i++)
     {
       u16 pc = i;
@@ -120,7 +122,7 @@ bool Compare(std::span<const u16> code1, std::span<const u16> code2)
   return code1.size() == code2.size() && code1.size() == count_equal;
 }
 
-std::string CodeToBinaryStringBE(std::span<const u16> code)
+std::string CodeToBinaryStringBE(const std::vector<u16>& code)
 {
   std::string str(code.size() * 2, '\0');
 
@@ -154,7 +156,7 @@ std::optional<std::vector<u16>> LoadBinary(const std::string& filename)
   return std::make_optional(BinaryStringBEToCode(buffer));
 }
 
-bool SaveBinary(std::span<const u16> code, const std::string& filename)
+bool SaveBinary(const std::vector<u16>& code, const std::string& filename)
 {
   const std::string buffer = CodeToBinaryStringBE(code);
 

@@ -7,7 +7,6 @@
 #include <string_view>
 #include <variant>
 
-#include "Common/FileUtil.h"
 #include "Common/Logging/Log.h"
 #include "Common/StringUtil.h"
 #include "Common/VariantUtil.h"
@@ -18,10 +17,9 @@
 #include "VideoCommon/GraphicsModSystem/Config/GraphicsMod.h"
 #include "VideoCommon/GraphicsModSystem/Config/GraphicsModAsset.h"
 #include "VideoCommon/GraphicsModSystem/Config/GraphicsModGroup.h"
-#include "VideoCommon/GraphicsModSystem/Constants.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModActionFactory.h"
+#include "VideoCommon/TextureInfo.h"
 #include "VideoCommon/VideoConfig.h"
-#include "VideoCommon/VideoEvents.h"
 
 std::unique_ptr<GraphicsModManager> g_graphics_mod_manager;
 
@@ -38,17 +36,11 @@ public:
       return;
     m_action_impl->OnDrawStarted(draw_started);
   }
-  void BeforeEFB(GraphicsModActionData::PreEFB* efb) override
+  void OnEFB(GraphicsModActionData::EFB* efb) override
   {
     if (!m_mod.m_enabled)
       return;
-    m_action_impl->BeforeEFB(efb);
-  }
-  void AfterEFB(GraphicsModActionData::PostEFB* efb) override
-  {
-    if (!m_mod.m_enabled)
-      return;
-    m_action_impl->AfterEFB(efb);
+    m_action_impl->OnEFB(efb);
   }
   void OnProjection(GraphicsModActionData::Projection* projection) override
   {
@@ -104,7 +96,7 @@ bool GraphicsModManager::Initialize()
     g_graphics_mod_manager->Load(*g_ActiveConfig.graphics_mod_config);
 
     m_end_of_frame_event =
-        GetVideoEvents().after_frame_event.Register([this](Core::System&) { EndOfFrame(); });
+        AfterFrameEvent::Register([this](Core::System&) { EndOfFrame(); }, "ModManager");
   }
 
   return true;
@@ -199,8 +191,6 @@ void GraphicsModManager::Load(const GraphicsModGroupConfig& config)
   const auto& mods = config.GetMods();
 
   auto filesystem_library = std::make_shared<VideoCommon::DirectFilesystemAssetLibrary>();
-  filesystem_library->Watch(File::GetSysDirectory() + DOLPHIN_SYSTEM_GRAPHICS_MOD_DIR);
-  filesystem_library->Watch(File::GetUserPath(D_GRAPHICSMOD_IDX));
 
   std::map<std::string, std::vector<GraphicsTargetConfig>> group_to_targets;
   for (const auto& mod : mods)
@@ -247,22 +237,23 @@ void GraphicsModManager::Load(const GraphicsModGroupConfig& config)
     }
   }
 
-  const auto create_action =
-      [filesystem_library = std::move(filesystem_library)](
-          const std::string_view& action_name, const picojson::value& json_data,
-          GraphicsModConfig mod_config) -> std::unique_ptr<GraphicsModAction> {
-    auto action = GraphicsModActionFactory::Create(action_name, json_data, filesystem_library);
-    if (action == nullptr)
-    {
-      return nullptr;
-    }
-    return std::make_unique<DecoratedAction>(std::move(action), std::move(mod_config));
-  };
-
   for (const auto& mod : mods)
   {
     for (const GraphicsModFeatureConfig& feature : mod.m_features)
     {
+      const auto create_action =
+          [filesystem_library](const std::string_view& action_name,
+                               const picojson::value& json_data,
+                               GraphicsModConfig mod_config) -> std::unique_ptr<GraphicsModAction> {
+        auto action =
+            GraphicsModActionFactory::Create(action_name, json_data, std::move(filesystem_library));
+        if (action == nullptr)
+        {
+          return nullptr;
+        }
+        return std::make_unique<DecoratedAction>(std::move(action), std::move(mod_config));
+      };
+
       const auto internal_group = fmt::format("{}.{}", mod.m_title, feature.m_group);
 
       const auto add_target = [&](const GraphicsTargetConfig& target) {

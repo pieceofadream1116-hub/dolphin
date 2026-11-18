@@ -10,7 +10,6 @@
 
 #include <array>
 #include <optional>
-#include <span>
 #include <string>
 #include <vector>
 
@@ -109,6 +108,6 @@ public:
   virtual std::optional<std::vector<SaveFile>> ReadFiles() = 0;
   virtual bool WriteHeader(const Header& header) = 0;
   virtual bool WriteBkHeader(const BkHeader& bk_header) = 0;
-  virtual bool WriteFiles(std::span<const SaveFile> files) = 0;
+  virtual bool WriteFiles(const std::vector<SaveFile>& files) = 0;
 };
 }  // namespace WiiSave

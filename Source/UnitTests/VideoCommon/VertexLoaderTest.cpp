@@ -5,10 +5,12 @@
 #include <limits>
 #include <memory>
 #include <tuple>
+#include <type_traits>
 #include <unordered_set>
 
 #include <gtest/gtest.h>  // NOLINT
 
+#include "Common/Common.h"
 #include "Common/MathUtil.h"
 #include "VideoCommon/CPMemory.h"
 #include "VideoCommon/DataReader.h"

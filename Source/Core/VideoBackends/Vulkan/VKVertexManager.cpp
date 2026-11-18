@@ -12,16 +12,20 @@
 
 #include "Core/System.h"
 
+#include "VideoBackends/Vulkan/CommandBufferManager.h"
 #include "VideoBackends/Vulkan/StateTracker.h"
 #include "VideoBackends/Vulkan/VKGfx.h"
 #include "VideoBackends/Vulkan/VKStreamBuffer.h"
+#include "VideoBackends/Vulkan/VKVertexFormat.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
 
 #include "VideoCommon/GeometryShaderManager.h"
 #include "VideoCommon/IndexGenerator.h"
 #include "VideoCommon/PixelShaderManager.h"
 #include "VideoCommon/Statistics.h"
+#include "VideoCommon/VertexLoaderManager.h"
 #include "VideoCommon/VertexShaderManager.h"
+#include "VideoCommon/VideoConfig.h"
 
 namespace Vulkan
 {
@@ -184,10 +188,7 @@ void VertexManager::CommitBuffer(u32 num_vertices, u32 vertex_stride, u32 num_in
 
   ADDSTAT(g_stats.this_frame.bytes_vertex_streamed, static_cast<int>(vertex_data_size));
   ADDSTAT(g_stats.this_frame.bytes_index_streamed, static_cast<int>(index_data_size));
-}
 
-void VertexManager::BindCommittedBuffer(u32 /*vertex_stride*/)
-{
   StateTracker::GetInstance()->SetVertexBuffer(m_vertex_stream_buffer->GetBuffer(), 0,
                                                VERTEX_STREAM_BUFFER_SIZE);
   StateTracker::GetInstance()->SetIndexBuffer(m_index_stream_buffer->GetBuffer(), 0,
@@ -260,7 +261,7 @@ void VertexManager::UpdatePixelShaderConstants()
   if (pixel_shader_manager.custom_constants_dirty)
   {
     StateTracker::GetInstance()->SetGXUniformBuffer(
-        UBO_DESCRIPTOR_SET_BINDING_CUST, m_uniform_stream_buffer->GetBuffer(),
+        UBO_DESCRIPTOR_SET_BINDING_PS_CUST, m_uniform_stream_buffer->GetBuffer(),
         m_uniform_stream_buffer->GetCurrentOffset(),
         static_cast<u32>(pixel_shader_manager.custom_constants.size()));
     std::memcpy(m_uniform_stream_buffer->GetCurrentHostPointer(),
@@ -336,7 +337,7 @@ void VertexManager::UploadAllConstants()
   if (!pixel_shader_manager.custom_constants.empty())
   {
     StateTracker::GetInstance()->SetGXUniformBuffer(
-        UBO_DESCRIPTOR_SET_BINDING_CUST, m_uniform_stream_buffer->GetBuffer(),
+        UBO_DESCRIPTOR_SET_BINDING_PS_CUST, m_uniform_stream_buffer->GetBuffer(),
         m_uniform_stream_buffer->GetCurrentOffset() + custom_pixel_constants_offset,
         custom_constants_size);
   }

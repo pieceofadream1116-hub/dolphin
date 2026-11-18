@@ -6,8 +6,10 @@
 #include <cmath>
 #include <string>
 
+#include "InputCommon/ControlReference/ControlReference.h"
 #include "InputCommon/ControllerEmu/Control/Control.h"
 #include "InputCommon/ControllerEmu/ControlGroup/ControlGroup.h"
+#include "InputCommon/ControllerEmu/Setting/NumericSetting.h"
 
 namespace ControllerEmu
 {
@@ -15,7 +17,7 @@ class Buttons : public ControlGroup
 {
 public:
   explicit Buttons(const std::string& name_);
-  Buttons(std::string ini_name, std::string group_name);
+  Buttons(const std::string& ini_name, const std::string& group_name);
 
   template <typename C>
   void GetState(C* const buttons, const C* bitmasks) const

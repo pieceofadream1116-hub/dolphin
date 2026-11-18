@@ -4,7 +4,9 @@
 #include "DiscIO/DirectoryBlob.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
+#include <locale>
 #include <map>
 #include <memory>
 #include <set>
@@ -15,12 +17,14 @@
 
 #include "Common/Align.h"
 #include "Common/Assert.h"
+#include "Common/CommonPaths.h"
 #include "Common/CommonTypes.h"
-#include "Common/DirectIOFile.h"
 #include "Common/FileUtil.h"
+#include "Common/IOFile.h"
 #include "Common/Logging/Log.h"
 #include "Common/StringUtil.h"
 #include "Common/Swap.h"
+#include "Core/Boot/DolReader.h"
 #include "Core/IOS/ES/Formats.h"
 #include "DiscIO/Blob.h"
 #include "DiscIO/DiscUtils.h"
@@ -93,8 +97,9 @@ bool DiscContent::Read(u64* offset, u64* length, u8** buffer, DirectoryBlobReade
     if (std::holds_alternative<ContentFile>(m_content_source))
     {
       const auto& content = std::get<ContentFile>(m_content_source);
-      File::DirectIOFile file(content.m_filename, File::AccessMode::Read);
-      if (!file.OffsetRead(content.m_offset + offset_in_content, *buffer, bytes_to_read))
+      File::IOFile file(content.m_filename, "rb");
+      if (!file.Seek(content.m_offset + offset_in_content, File::SeekOrigin::Begin) ||
+          !file.ReadBytes(*buffer, bytes_to_read))
       {
         return false;
       }
@@ -575,7 +580,7 @@ u64 DirectoryBlobReader::GetDataSize() const
   return m_data_size;
 }
 
-void DirectoryBlobReader::SetNonpartitionDiscHeaderFromFile(std::span<const u8> partition_header,
+void DirectoryBlobReader::SetNonpartitionDiscHeaderFromFile(const std::vector<u8>& partition_header,
                                                             const std::string& game_partition_root)
 {
   std::vector<u8> header_bin(WII_NONPARTITION_DISCHEADER_SIZE);
@@ -585,7 +590,7 @@ void DirectoryBlobReader::SetNonpartitionDiscHeaderFromFile(std::span<const u8> 
   SetNonpartitionDiscHeader(partition_header, std::move(header_bin));
 }
 
-void DirectoryBlobReader::SetNonpartitionDiscHeader(std::span<const u8> partition_header,
+void DirectoryBlobReader::SetNonpartitionDiscHeader(const std::vector<u8>& partition_header,
                                                     std::vector<u8> header_bin)
 {
   const size_t header_bin_size = header_bin.size();
@@ -619,7 +624,7 @@ void DirectoryBlobReader::SetWiiRegionDataFromFile(const std::string& game_parti
   SetWiiRegionData(wii_region_data, region_bin_path);
 }
 
-void DirectoryBlobReader::SetWiiRegionData(std::span<const u8> wii_region_data,
+void DirectoryBlobReader::SetWiiRegionData(const std::vector<u8>& wii_region_data,
                                            const std::string& log_path)
 {
   std::vector<u8> region_data(0x10, 0x00);
@@ -792,9 +797,7 @@ void DirectoryBlobReader::SetPartitionHeader(DirectoryBlobPartition* partition,
   }
 
   constexpr u32 PARTITION_HEADER_SIZE = 0x1c;
-  const u64 data_size =
-      Common::DivideRoundingUp(partition->GetDataSize(), VolumeWii::BLOCK_DATA_SIZE) *
-      VolumeWii::BLOCK_TOTAL_SIZE;
+  const u64 data_size = Common::AlignUp(partition->GetDataSize(), 0x7c00) / 0x7c00 * 0x8000;
   std::vector<u8> partition_header(PARTITION_HEADER_SIZE);
   Write32(static_cast<u32>(tmd_size), 0x0, &partition_header);
   Write32(TMD_OFFSET >> 2, 0x4, &partition_header);
@@ -839,9 +842,9 @@ static void GenerateBuilderNodesFromFileSystem(const VolumeDisc& volume, const P
   }
 }
 
-DirectoryBlobPartition::DirectoryBlobPartition(std::string root_directory,
+DirectoryBlobPartition::DirectoryBlobPartition(const std::string& root_directory,
                                                std::optional<bool> is_wii)
-    : m_root_directory(std::move(root_directory))
+    : m_root_directory(root_directory)
 {
   std::vector<u8> disc_header(DISCHEADER_SIZE);
   if (ReadFileToVector(m_root_directory + "sys/boot.bin", &disc_header) < 0x20)
@@ -897,8 +900,7 @@ DirectoryBlobPartition::DirectoryBlobPartition(
     const std::function<void(std::vector<FSTBuilderNode>* fst_nodes, FSTBuilderNode* dol_node)>&
         fst_callback,
     DirectoryBlobReader* blob)
-    : m_is_triforce(volume && volume->GetVolumeType() == Platform::Triforce),
-      m_wrapped_partition(partition)
+    : m_wrapped_partition(partition)
 {
   std::vector<FSTBuilderNode> sys_nodes;
 
@@ -964,7 +966,7 @@ DirectoryBlobPartition::DirectoryBlobPartition(
 }
 
 void DirectoryBlobPartition::SetDiscType(std::optional<bool> is_wii,
-                                         std::span<const u8> disc_header)
+                                         const std::vector<u8>& disc_header)
 {
   if (is_wii.has_value())
   {
@@ -1011,9 +1013,9 @@ void DirectoryBlobPartition::SetBI2(std::vector<u8> bi2)
 
 u64 DirectoryBlobPartition::SetApploaderFromFile(const std::string& path)
 {
-  File::DirectIOFile file(path, File::AccessMode::Read);
+  File::IOFile file(path, "rb");
   std::vector<u8> apploader(file.GetSize());
-  file.Read(apploader);
+  file.ReadBytes(apploader.data(), apploader.size());
   return SetApploader(std::move(apploader), path);
 }
 
@@ -1111,7 +1113,7 @@ static void ConvertUTF8NamesToSHIFTJIS(std::vector<FSTBuilderNode>* fst)
   }
 }
 
-static u32 ComputeNameSize(std::span<const FSTBuilderNode> files)
+static u32 ComputeNameSize(const std::vector<FSTBuilderNode>& files)
 {
   u32 name_size = 0;
   for (const FSTBuilderNode& entry : files)
@@ -1233,14 +1235,6 @@ void DirectoryBlobPartition::WriteDirectory(std::vector<u8>* fst_data,
     }
     else
     {
-      // Skip Triforce DIMM so the file doesn't overlap with it. Any portion of
-      // a file placed in 0x1F000000-0x1F800000 would be shadowed by SRAM on the
-      // AMMediaboard and read back as DIMM contents instead of disc data.
-      if (m_is_triforce && *data_offset < 0x1F800000 && *data_offset + entry.m_size > 0x1F000000)
-      {
-        *data_offset = 0x1F800000ull;
-      }
-
       // put entry in FST
       WriteEntryData(fst_data, fst_offset, FILE_ENTRY, *name_offset, *data_offset, entry.m_size,
                      m_address_shift);
@@ -1254,20 +1248,18 @@ void DirectoryBlobPartition::WriteDirectory(std::vector<u8>* fst_data,
                        std::move(content.m_source));
       }
 
-      // For most files, an alignment of 0x20 is enough. But some files need 0x8000,
-      // in particular all DTK audio files in GameCube games.
-      // TODO: Do any Wii games need 0x8000 alignment?
-      const u64 data_alignment = m_is_triforce ? 0x20ull : 0x8000ull;
-      *data_offset = Common::AlignUp(*data_offset + entry.m_size, data_alignment);
+      // 32 KiB aligned - many games are fine with less alignment, but not all
+      *data_offset = Common::AlignUp(*data_offset + entry.m_size, 0x8000ull);
     }
   }
 }
 
 static size_t ReadFileToVector(const std::string& path, std::vector<u8>* vector)
 {
-  File::DirectIOFile file(path, File::AccessMode::Read);
-  file.Read(vector->data(), std::min<u64>(file.GetSize(), vector->size()));
-  return file.Tell();
+  File::IOFile file(path, "rb");
+  size_t bytes_read;
+  file.ReadArray<u8>(vector->data(), std::min<u64>(file.GetSize(), vector->size()), &bytes_read);
+  return bytes_read;
 }
 
 static void PadToAddress(u64 start_address, u64* address, u64* length, u8** buffer)

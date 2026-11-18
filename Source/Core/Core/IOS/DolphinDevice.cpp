@@ -9,6 +9,8 @@
 #include "Common/CommonPaths.h"
 #include "Common/FileUtil.h"
 #include "Common/IOFile.h"
+#include "Common/Logging/Log.h"
+#include "Common/NandPaths.h"
 #include "Common/SettingsHandler.h"
 #include "Common/Timer.h"
 #include "Common/Version.h"
@@ -37,20 +39,6 @@ enum
   IOCTL_DOLPHIN_GET_SYSTEM_TIME = 0x0A,
 
 };
-
-bool IsDeterministicRequest(int request)
-{
-  switch (request)
-  {
-  case IOCTL_DOLPHIN_GET_VERSION:
-  case IOCTL_DOLPHIN_SET_SPEED_LIMIT:  // FYI: NetPlay will instantly overwrite this.
-  case IOCTL_DOLPHIN_GET_CPU_SPEED:
-    return true;
-
-  default:
-    return false;
-  }
-}
 
 IPCReply GetVersion(Core::System& system, const IOCtlVRequest& request)
 {
@@ -282,12 +270,8 @@ DolphinDevice::DolphinDevice(EmulationKernel& ios, const std::string& device_nam
 
 std::optional<IPCReply> DolphinDevice::IOCtlV(const IOCtlVRequest& request)
 {
-  if (Core::WantsDeterminism() && !IsDeterministicRequest(request.request))
-  {
-    WARN_LOG_FMT(IOS, "WantsDeterminism causing IPC_EACCES for nondeterministic request: {:02x}",
-                 request.request);
+  if (Core::WantsDeterminism())
     return IPCReply(IPC_EACCES);
-  }
 
   switch (request.request)
   {

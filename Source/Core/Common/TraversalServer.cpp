@@ -7,11 +7,15 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <tuple>
+#include <unistd.h>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <fmt/format.h>
@@ -470,9 +474,6 @@ int main()
     FD_SET(sock, &readSet);
     FD_SET(sockAlt, &readSet);
     rv = select(std::max(sock, sockAlt) + 1, &readSet, nullptr, nullptr, &tv);
-    currentTime = std::chrono::duration_cast<std::chrono::microseconds>(
-                      std::chrono::steady_clock::now().time_since_epoch())
-                      .count();
     if (rv < 0)
     {
       if (errno != EINTR && errno != EAGAIN)
@@ -502,6 +503,9 @@ int main()
     // note: switch to recvmmsg (yes, mmsg) if this becomes
     // expensive
     rv = recvfrom(recvsock, &packet, sizeof(packet), 0, (sockaddr*)&raddr, &addrLen);
+    currentTime = std::chrono::duration_cast<std::chrono::microseconds>(
+                      std::chrono::system_clock::now().time_since_epoch())
+                      .count();
     if (rv < 0)
     {
       if (errno != EINTR && errno != EAGAIN)

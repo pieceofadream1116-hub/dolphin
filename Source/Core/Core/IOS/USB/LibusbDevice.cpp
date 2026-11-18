@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <ranges>
 #include <utility>
 #include <vector>
 
@@ -18,6 +19,7 @@
 #include "Common/Assert.h"
 #include "Common/Config/Config.h"
 #include "Common/Logging/Log.h"
+#include "Common/StringUtil.h"
 #include "Core/Config/MainSettings.h"
 #include "Core/HW/Memmap.h"
 #include "Core/IOS/Device.h"
@@ -161,13 +163,13 @@ bool LibusbDevice::Attach()
   return true;
 }
 
-bool LibusbDevice::AttachAndChangeInterface(const u8 iface)
+bool LibusbDevice::AttachAndChangeInterface(const u8 interface)
 {
   if (!Attach())
     return false;
 
-  if (iface != m_active_interface)
-    return ChangeInterface(iface) == LIBUSB_SUCCESS;
+  if (interface != m_active_interface)
+    return ChangeInterface(interface) == LIBUSB_SUCCESS;
 
   return true;
 }
@@ -183,11 +185,11 @@ int LibusbDevice::CancelTransfer(const u8 endpoint)
   return IPC_SUCCESS;
 }
 
-int LibusbDevice::ChangeInterface(const u8 iface)
+int LibusbDevice::ChangeInterface(const u8 interface)
 {
   INFO_LOG_FMT(IOS_USB, "[{:04x}:{:04x} {}] Changing interface to {}", m_vid, m_pid,
-               m_active_interface, iface);
-  m_active_interface = iface;
+               m_active_interface, interface);
+  m_active_interface = interface;
   return LIBUSB_SUCCESS;
 }
 
@@ -476,8 +478,8 @@ void LibusbDevice::TransferEndpoint::AddTransfer(std::unique_ptr<TransferCommand
   m_transfers.emplace(transfer, std::move(command));
 }
 
-void LibusbDevice::TransferEndpoint::HandleTransfer(
-    libusb_transfer* transfer, const std::function<s32(const TransferCommand&)>& fn)
+void LibusbDevice::TransferEndpoint::HandleTransfer(libusb_transfer* transfer,
+                                                    std::function<s32(const TransferCommand&)> fn)
 {
   std::lock_guard lk{m_transfers_mutex};
   const auto iterator = m_transfers.find(transfer);

@@ -3,8 +3,6 @@
 
 #include "InputCommon/ControllerInterface/Wiimote/WiimoteController.h"
 
-#include <numbers>
-
 #include "Common/BitUtils.h"
 #include "Common/Logging/Log.h"
 #include "Common/MathUtil.h"
@@ -507,7 +505,7 @@ void Device::RunTasks()
   {
     static constexpr u16 MPLUS_POLL_ADDR = WiimoteEmu::MotionPlus::PASSTHROUGH_MODE_OFFSET;
     ReadData(AddressSpace::I2CBus, WiimoteEmu::MotionPlus::INACTIVE_DEVICE_ADDR, MPLUS_POLL_ADDR, 1,
-             [this](const ReadResponse& response) {
+             [this](ReadResponse response) {
                if (!response)
                {
                  DEBUG_LOG_FMT(WIIMOTE, "WiiRemote: M+ poll failed.");
@@ -739,7 +737,7 @@ void Device::ProcessExtensionID(u8 id_0, u8 id_4, u8 id_5)
   }
   else
   {
-    // This is a normal occurrence before extension initialization.
+    // This is a normal occurance before extension initialization.
     DEBUG_LOG_FMT(WIIMOTE, "WiiRemote: Unknown extension: {} {} {}.", id_0, id_4, id_5);
     m_extension_id = ExtensionID::Unsupported;
   }
@@ -1260,7 +1258,7 @@ void Device::UpdateOrientation()
   m_rotation_inputs =
       Common::Vec3{WiimoteEmu::GetPitch(m_orientation), WiimoteEmu::GetRoll(m_orientation),
                    WiimoteEmu::GetYaw(m_orientation)} /
-      std::numbers::pi_v<float>;
+      float(MathUtil::PI);
 }
 
 void Device::IRState::ProcessData(const DataReportManipulator& manipulator)
@@ -1330,7 +1328,7 @@ void Device::IRState::ProcessData(const DataReportManipulator& manipulator)
   if (points.Count() >= 2)
   {
     const auto variance = points.PopulationVariance();
-    // Adjusts Y coordinate to match horizontal FOV.
+    // Adjusts Y coorinate to match horizontal FOV.
     const auto separation =
         Common::Vec2(std::sqrt(variance.x), std::sqrt(variance.y)) /
         Common::Vec2(WiimoteEmu::CameraLogic::CAMERA_RES_X,

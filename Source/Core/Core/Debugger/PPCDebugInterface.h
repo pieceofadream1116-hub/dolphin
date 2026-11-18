@@ -3,15 +3,12 @@
 
 #pragma once
 
-#include <concepts>
 #include <cstddef>
 #include <memory>
-#include <span>
 #include <string>
 
 #include "Common/Debug/MemoryPatches.h"
 #include "Common/Debug/Watches.h"
-#include "Common/Swap.h"
 #include "Core/Debugger/DebugInterface.h"
 #include "Core/NetworkCaptureLogger.h"
 
@@ -22,17 +19,8 @@ class System;
 }  // namespace Core
 class PPCSymbolDB;
 
-void ApplyMemoryPatch(const Core::CPUThreadGuard& guard, std::span<u8> value, const u32 address,
+void ApplyMemoryPatch(const Core::CPUThreadGuard&, Common::Debug::MemoryPatch& patch,
                       bool store_existing_value = true);
-
-template <std::unsigned_integral T>
-void ApplyMemoryPatch(const Core::CPUThreadGuard& guard, T value, const u32 address)
-{
-  Common::BigEndianValue<T> big_endian{value};
-  auto data =
-      std::span<u8, sizeof(T)>{reinterpret_cast<u8*>(std::addressof(big_endian)), sizeof(T)};
-  ApplyMemoryPatch(guard, data, address);
-}
 
 class PPCPatches final : public Common::Debug::MemoryPatches
 {
@@ -65,7 +53,7 @@ public:
   void DisableWatch(std::size_t index) override;
   bool HasEnabledWatch(u32 address) const override;
   void RemoveWatch(std::size_t index) override;
-  void LoadWatchesFromStrings(std::span<const std::string> watches) override;
+  void LoadWatchesFromStrings(const std::vector<std::string>& watches) override;
   std::vector<std::string> SaveWatchesToStrings() const override;
   void ClearWatches() override;
 

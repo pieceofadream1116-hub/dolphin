@@ -333,16 +333,20 @@ void Jit64::mfspr(UGeckoInstruction inst)
     CVTSI2SS(XMM0, PPCSTATE(downcount));
     MULSS(XMM0, MDisp(rcx, offsetof(CoreTiming::Globals, last_OC_factor_inverted)));
     CVTSS2SI(rdx, R(XMM0));  // RDX is downcount scaled by the overclocking factor
-    MOVSX(64, 32, rax, MDisp(rcx, offsetof(CoreTiming::Globals, slice_length)));
+    MOV(32, rax, MDisp(rcx, offsetof(CoreTiming::Globals, slice_length)));
     SUB(64, rax, rdx);  // cycles since the last CoreTiming::Advance() event is (slicelength -
                         // Scaled_downcount)
     ADD(64, rax, MDisp(rcx, offsetof(CoreTiming::Globals, global_timer)));
     SUB(64, rax, MDisp(rcx, offsetof(CoreTiming::Globals, fake_TB_start_ticks)));
     // It might seem convenient to correct the timer for the block position here for even more
-    // accurate timing, but as of currently, this can break games. If we end up reading a time
-    // *after* the time at which an interrupt was supposed to occur, e.g. because we're 100 cycles
-    // into a block with only 50 downcount remaining, some games don't function correctly, such as
-    // Karaoke Party Revolution, which won't get past the loading screen.
+    // accurate
+    // timing, but as of currently, this can break games. If we end up reading a time *after* the
+    // time
+    // at which an interrupt was supposed to occur, e.g. because we're 100 cycles into a block with
+    // only
+    // 50 downcount remaining, some games don't function correctly, such as Karaoke Party
+    // Revolution,
+    // which won't get past the loading screen.
     // if (js.downcountAmount)
     //	ADD(64, rax, Imm32(js.downcountAmount));
 
@@ -432,14 +436,11 @@ void Jit64::mtmsr(UGeckoInstruction inst)
   FALLBACK_IF(jo.fp_exceptions);
 
   {
-    OpArg Rs_op_arg;
-    {
-      RCOpArg Rs = gpr.BindOrImm(inst.RS, RCMode::Read);
-      RegCache::Realize(Rs);
-      MOV(32, PPCSTATE(msr), Rs);
-      Rs_op_arg = Rs;
-    }
-    MSRUpdated(Rs_op_arg, RSCRATCH2);
+    RCOpArg Rs = gpr.BindOrImm(inst.RS, RCMode::Read);
+    RegCache::Realize(Rs);
+    MOV(32, PPCSTATE(msr), Rs);
+
+    MSRUpdated(Rs, RSCRATCH2);
   }
 
   gpr.Flush();
@@ -594,7 +595,7 @@ void Jit64::crXXX(UGeckoInstruction inst)
   JITDISABLE(bJITSystemRegistersOff);
   DEBUG_ASSERT_MSG(DYNA_REC, inst.OPCD == 19, "Invalid crXXX");
 
-  // TODO(merry): Further optimizations can be performed here. For example,
+  // TODO(merry): Futher optimizations can be performed here. For example,
   // instead of extracting each CR field bit then setting it, the operation
   // could be performed on the internal format directly instead and the
   // relevant bit result can be masked out.

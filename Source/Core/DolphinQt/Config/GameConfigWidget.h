@@ -19,7 +19,7 @@ class Layer;
 
 class ConfigBool;
 class ConfigInteger;
-class ConfigFloatSlider;
+class ConfigSlider;
 class ConfigStringChoice;
 class QPushButton;
 class QTabWidget;
@@ -50,8 +50,8 @@ private:
   ConfigBool* m_use_monoscopic_shadows;
 
   ConfigStringChoice* m_deterministic_dual_core;
-  ConfigFloatSlider* m_depth_slider;
-  ConfigFloatSlider* m_convergence_slider;
+  ConfigSlider* m_depth_slider;
+  ConfigInteger* m_convergence_spin;
 
   const UICommon::GameFile& m_game;
   std::string m_game_id;

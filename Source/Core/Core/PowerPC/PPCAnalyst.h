@@ -5,11 +5,11 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <set>
 #include <vector>
 
 #include "Common/BitSet.h"
 #include "Common/CommonTypes.h"
-#include "Common/RangeSet.h"
 #include "Core/PowerPC/PPCTables.h"
 
 class PPCSymbolDB;
@@ -26,18 +26,6 @@ class CPUThreadGuard;
 
 namespace PPCAnalyst
 {
-enum class BranchAction : u8
-{
-  Normal,
-  // The analyzer followed the branch, and thus the next instruction corresponds to its target. This
-  // can only be done if the branch is unconditional.
-  Follow,
-  // The branch represents a loop with idempotent properties: if the condition is true, then the
-  // emulation should skip directly to timing handling, as interrupts are the only thing that can
-  // change the loop's effects.
-  IdleLoop,
-};
-
 struct CodeOp  // 16B
 {
   UGeckoInstruction inst;
@@ -50,7 +38,8 @@ struct CodeOp  // 16B
   s8 fregOut = 0;
   BitSet8 crIn;
   BitSet8 crOut;
-  BranchAction branchAction = {};
+  bool branchUsesCtr = false;
+  bool branchIsIdleLoop = false;
   BitSet8 wantsCR;
   bool wantsFPRF = false;
   bool wantsCA = false;
@@ -62,14 +51,11 @@ struct CodeOp  // 16B
   bool canCauseException = false;
   bool skipLRStack = false;
   bool skip = false;  // followed BL-s for example
-  BitSet8 crWillBeRead;
-  BitSet8 crWillBeWritten;
+  BitSet8 crInUse;
   BitSet8 crDiscardable;
   // which registers are still needed after this instruction in this block
-  BitSet32 gprWillBeRead;
-  BitSet32 gprWillBeWritten;
-  BitSet32 fprWillBeRead;
-  BitSet32 fprWillBeWritten;
+  BitSet32 fprInUse;
+  BitSet32 gprInUse;
   // which registers have values which are known to be unused after this instruction
   BitSet32 gprDiscardable;
   BitSet32 fprDiscardable;
@@ -143,7 +129,7 @@ struct CodeBlock
   BitSet32 m_gpr_inputs;
 
   // Which memory locations are occupied by this block.
-  Common::RangeSet<u32> m_physical_addresses;
+  std::set<u32> m_physical_addresses;
 };
 
 class PPCAnalyzer

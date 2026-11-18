@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <numeric>
 
 #include <QMouseEvent>
 #include <QPainter>
@@ -22,11 +21,6 @@ IRWidget::IRWidget(QWidget* parent) : QWidget(parent)
 
   // If the widget gets too small, it will get deformed.
   setMinimumSize(QSize(64, 48));
-}
-
-QSize IRWidget::sizeHint() const
-{
-  return QSize(128, 96);
 }
 
 void IRWidget::SetX(u16 x)
@@ -66,7 +60,7 @@ void IRWidget::paintEvent(QPaintEvent* event)
   painter.drawLine(PADDING + w / 2, PADDING + h / 2, x, y);
 
   painter.setBrush(Qt::blue);
-  int wh_avg = std::midpoint(w, h);
+  int wh_avg = (w + h) / 2;
   int radius = wh_avg / 30;
   painter.drawEllipse(x - radius, y - radius, radius * 2, radius * 2);
 }

@@ -6,24 +6,23 @@
 #include <array>
 #include <cstddef>
 #include <iosfwd>
+#include <map>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "Common/BitSet.h"
 #include "Common/CommonTypes.h"
 #include "Common/Config/ConfigInfo.h"
-#include "Common/LazyMemoryRegionBitSet.h"
 #include "Common/x64Emitter.h"
 #include "Core/CPUThreadConfigCallback.h"
 #include "Core/ConfigManager.h"
 #include "Core/MachineContext.h"
 #include "Core/PowerPC/CPUCoreBase.h"
-#include "Core/PowerPC/Gekko.h"
 #include "Core/PowerPC/JitCommon/JitAsmCommon.h"
 #include "Core/PowerPC/JitCommon/JitCache.h"
 #include "Core/PowerPC/PPCAnalyst.h"
-#include "Core/PowerPC/PowerPC.h"
 
 namespace Core
 {
@@ -80,8 +79,6 @@ protected:
   static constexpr size_t GUARD_SIZE = 64 * 1024;
   static constexpr size_t GUARD_OFFSET = SAFE_STACK_SIZE - GUARD_SIZE;
 
-  static constexpr size_t INSTRUCTION_BIT_SET_SIZE = (1ULL << 32) / sizeof(UGeckoInstruction);
-
   struct JitOptions
   {
     bool enableBlocklink;
@@ -101,8 +98,8 @@ protected:
     u32 downcountAmount;
     u32 numLoadStoreInst;
     u32 numFloatingPointInst;
-    // If this is true, we need to generate an exception handler for the fastmem load.
-    bool fastmemLoadStore;
+    // If this is set, we need to generate an exception handler for the fastmem load.
+    u8* fastmemLoadStore;
     // If this is set, a load or store already prepared a jump to the exception handler for us,
     // so just fixup that branch instead of testing for a DSI again.
     bool fixupExceptionHandler;
@@ -130,9 +127,9 @@ protected:
 
     JitBlock* curBlock;
 
-    Common::LazyMemoryRegionBitSet fifoWriteAddresses{INSTRUCTION_BIT_SET_SIZE};
-    Common::LazyMemoryRegionBitSet pairedQuantizeAddresses{INSTRUCTION_BIT_SET_SIZE};
-    Common::LazyMemoryRegionBitSet noSpeculativeConstantsAddresses{INSTRUCTION_BIT_SET_SIZE};
+    std::unordered_set<u32> fifoWriteAddresses;
+    std::unordered_set<u32> pairedQuantizeAddresses;
+    std::unordered_set<u32> noSpeculativeConstantsAddresses;
   };
 
   PPCAnalyst::CodeBlock code_block;
@@ -161,18 +158,14 @@ protected:
   bool m_low_dcbz_hack = false;
   bool m_fprf = false;
   bool m_accurate_nans = false;
-  bool m_accurate_fmadds = false;
   bool m_fastmem_enabled = false;
-  bool m_page_table_fastmem_enabled = false;
   bool m_accurate_cpu_cache_enabled = false;
 
   bool m_enable_blr_optimization = false;
   bool m_cleanup_after_stackfault = false;
   u8* m_stack_guard = nullptr;
 
-  static const std::array<std::pair<bool JitBase::*, const Config::Info<bool>*>, 25> JIT_SETTINGS;
-
-  [[nodiscard]] bool CheckValidity() const;
+  static const std::array<std::pair<bool JitBase::*, const Config::Info<bool>*>, 23> JIT_SETTINGS;
 
   bool DoesConfigNeedRefresh() const;
   void RefreshConfig();
@@ -204,13 +197,8 @@ public:
   JitBase& operator=(JitBase&&) = delete;
   ~JitBase() override;
 
-  bool IsProfilingEnabled() const { return m_enable_profiling && m_enable_debugging; }
+  bool IsProfilingEnabled() const { return m_enable_profiling; }
   bool IsDebuggingEnabled() const { return m_enable_debugging; }
-  bool IsBranchWatchEnabled() const
-  {
-    auto& branch_watch = m_system.GetPowerPC().GetBranchWatch();
-    return branch_watch.GetRecordingActive();
-  }
 
   static const u8* Dispatch(JitBase& jit);
   virtual JitBaseBlockCache* GetBlockCache() = 0;
@@ -227,8 +215,6 @@ public:
   virtual std::size_t DisassembleFarCode(const JitBlock& block, std::ostream& stream) const = 0;
 
   virtual const CommonAsmRoutinesBase* GetAsmRoutines() = 0;
-
-  virtual bool WantsPageTableMappings() const;
 
   virtual bool HandleFault(uintptr_t access_address, SContext* ctx) = 0;
   bool HandleStackFault();

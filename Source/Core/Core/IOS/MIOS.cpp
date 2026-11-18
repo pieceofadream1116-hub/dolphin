@@ -4,11 +4,14 @@
 #include "Core/IOS/MIOS.h"
 
 #include <cstring>
+#include <utility>
 
 #include "Common/Assert.h"
 #include "Common/CommonTypes.h"
 #include "Common/FileUtil.h"
 #include "Common/Logging/Log.h"
+#include "Common/MsgHandler.h"
+#include "Common/Swap.h"
 
 #include "Core/Config/MainSettings.h"
 #include "Core/ConfigManager.h"
@@ -86,7 +89,7 @@ bool Load(Core::System& system)
   PowerPC::PowerPCState& ppc_state = power_pc.GetPPCState();
   ppc_state.msr.Hex = 0;
   ppc_state.pc = 0x3400;
-  power_pc.MSRUpdated();
+  PowerPC::MSRUpdated(ppc_state);
 
   NOTICE_LOG_FMT(IOS, "Loaded MIOS and bootstrapped PPC.");
 

@@ -5,8 +5,6 @@
 #include <cstddef>
 #include <memory>
 #include <type_traits>
-#include "Common/CommonTypes.h"
-#include "Common/MathUtil.h"
 
 namespace Common
 {
@@ -72,8 +70,8 @@ static_assert(!std::is_same_v<ObjectType<&Bar::c>, Bar>);
 
 // Template for checking if Types is count occurrences of T.
 template <typename T, size_t count, typename... Ts>
-struct IsNOf : std::bool_constant<std::conjunction_v<std::is_convertible<Ts, T>...> &&
-                                  sizeof...(Ts) == count>
+struct IsNOf : std::integral_constant<bool, std::conjunction_v<std::is_convertible<Ts, T>...> &&
+                                                sizeof...(Ts) == count>
 {
 };
 
@@ -97,7 +95,13 @@ public:
   T& Construct(Args&&... args)
   {
     static_assert(sizeof(ManuallyConstructedValue) == sizeof(T));
+
+// TODO: Remove placement-new version when we can require Clang 16.
+#if defined(__cpp_aggregate_paren_init) && (__cpp_aggregate_paren_init >= 201902L)
     return *std::construct_at(&m_value.data, std::forward<Args>(args)...);
+#else
+    return *::new (&m_value.data) T{std::forward<Args>(args)...};
+#endif
   }
 
   void Destroy() { std::destroy_at(&m_value.data); }
@@ -137,13 +141,4 @@ concept TypedEnum = std::is_same_v<std::underlying_type_t<T>, Underlying>;
 
 template <typename T>
 concept BooleanEnum = TypedEnum<T, bool>;
-
-template <typename T>
-requires(sizeof(T) <= sizeof(u64) && std::has_single_bit(sizeof(T)))
-using MakeUnsignedSameSize =
-    std::tuple_element_t<MathUtil::IntLog2(sizeof(T)), std::tuple<u8, u16, u32, u64>>;
-
-template <std::unsigned_integral T>
-using MakeAtLeastU32 = std::conditional_t<std::is_same_v<T, u64>, u64, u32>;
-
 }  // namespace Common

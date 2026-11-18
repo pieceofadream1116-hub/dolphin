@@ -3,11 +3,15 @@
 
 #include "DiscIO/DiscScrubber.h"
 
+#include <algorithm>
 #include <cstddef>
+#include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "Common/Align.h"
+#include "Common/Assert.h"
 #include "Common/CommonTypes.h"
 #include "Common/Logging/Log.h"
 

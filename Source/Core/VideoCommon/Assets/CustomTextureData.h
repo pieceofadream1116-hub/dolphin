@@ -5,7 +5,6 @@
 
 #include <span>
 #include <string>
-#include <vector>
 
 #include "Common/Buffer.h"
 #include "Common/CommonTypes.h"

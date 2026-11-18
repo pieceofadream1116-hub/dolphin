@@ -15,6 +15,8 @@ void Init();
 void ResetRumble();
 void Shutdown();
 void SetAdapterCallback(std::function<void(void)> func);
+void StartScanThread();
+void StopScanThread();
 
 // Buttons have PAD_GET_ORIGIN set on new connection
 // Netplay and CSIDevice_GCAdapter make use of this.
@@ -24,8 +26,6 @@ void Output(int chan, u8 rumble_command);
 bool IsDetected(const char** error_message);
 bool DeviceConnected(int chan);
 void ResetDeviceType(int chan);
-
-// Callable from any thread. Returns 0 when the adapter is not detected.
-double GetCurrentPollRate();
+bool UseAdapter();
 
 }  // namespace GCAdapter

@@ -19,6 +19,7 @@ jmethodID GetOnTitleChanged();
 jmethodID GetFinishEmulationActivity();
 
 jclass GetAnalyticsClass();
+jmethodID GetSendAnalyticsReport();
 jmethodID GetAnalyticsValue();
 
 jclass GetGameFileClass();
@@ -27,32 +28,6 @@ jmethodID GetGameFileConstructor();
 
 jclass GetGameFileCacheClass();
 jfieldID GetGameFileCachePointer();
-
-jclass GetNetplaySessionClass();
-jfieldID GetNetPlayUICallbacksPointer();
-jfieldID GetNetPlayClientPointer();
-jfieldID GetNetPlayServerPointer();
-jmethodID GetNetplayOnBootGame();
-jmethodID GetNetplayOnStopGame();
-jmethodID GetNetplayOnConnectionLost();
-jmethodID GetNetplayOnConnectionError();
-jmethodID GetNetplayOnGameChanged();
-jmethodID GetNetplayOnHostInputAuthorityChanged();
-jmethodID GetNetplayOnPadBufferChanged();
-jmethodID GetNetplayOnChatMessageReceived();
-jmethodID GetNetplayUpdate();
-jmethodID GetNetplayOnShowChunkedProgressDialog();
-jmethodID GetNetplayOnSetChunkedProgress();
-jmethodID GetNetplayOnHideChunkedProgressDialog();
-jmethodID GetNetplayOnDesync();
-jmethodID GetNetplayOnShowGameDigestDialog();
-jmethodID GetNetplayOnSetGameDigestProgress();
-jmethodID GetNetplayOnSetGameDigestResult();
-jmethodID GetNetplayOnAbortGameDigest();
-jmethodID GetNetplayOnTraversalStateChanged();
-
-jclass GetNetplayPlayerClass();
-jmethodID GetNetplayPlayerConstructor();
 
 jclass GetPairClass();
 jmethodID GetPairConstructor();
@@ -149,9 +124,5 @@ jmethodID GetRunnableRun();
 jclass GetAudioUtilsClass();
 jmethodID GetAudioUtilsGetSampleRate();
 jmethodID GetAudioUtilsGetFramesPerBuffer();
-
-jclass GetTitleDatabaseClass();
-jfieldID GetTitleDatabasePointer();
-jmethodID GetTitleDatabaseConstructor();
 
 }  // namespace IDCache

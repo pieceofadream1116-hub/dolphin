@@ -51,7 +51,7 @@ class GameDetailsDialog : DialogFragment() {
                     textTimePlayed.visibility = View.GONE
                 }
 
-                textGameTitle.text = gameFile.getTitle(GameFileCacheManager.getTitleDatabase())
+                textGameTitle.text = gameFile.getTitle()
                 textDescription.text = gameFile.getDescription()
                 if (gameFile.getDescription().isEmpty()) {
                     textDescription.visibility = View.GONE
@@ -118,7 +118,7 @@ class GameDetailsDialog : DialogFragment() {
                     textTimePlayed.visibility = View.GONE
                 }
 
-                textGameTitle.text = gameFile.getTitle(GameFileCacheManager.getTitleDatabase())
+                textGameTitle.text = gameFile.getTitle()
                 textDescription.text = gameFile.getDescription()
                 if (gameFile.getDescription().isEmpty()) {
                     tvBinding.textDescription.visibility = View.GONE

@@ -7,13 +7,13 @@
 #include <optional>
 #include <span>
 #include <sstream>
-#include <utility>
 
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 
 #include "Common/Arm64Emitter.h"
 #include "Common/CommonTypes.h"
+#include "Common/EnumUtils.h"
 #include "Common/GekkoDisassembler.h"
 #include "Common/HostDisassembler.h"
 #include "Common/Logging/Log.h"
@@ -31,10 +31,8 @@
 #include "Core/HW/ProcessorInterface.h"
 #include "Core/Host.h"
 #include "Core/PatchEngine.h"
-#include "Core/PowerPC/Gekko.h"
 #include "Core/PowerPC/Interpreter/Interpreter.h"
 #include "Core/PowerPC/JitArm64/JitArm64_RegCache.h"
-#include "Core/PowerPC/JitCommon/ConstantPropagation.h"
 #include "Core/PowerPC/JitInterface.h"
 #include "Core/PowerPC/PowerPC.h"
 #include "Core/System.h"
@@ -57,11 +55,8 @@ JitArm64::JitArm64(Core::System& system)
 
 JitArm64::~JitArm64() = default;
 
-bool JitArm64::Init()
+void JitArm64::Init()
 {
-  if (!CheckValidity())
-    return false;
-
   InitFastmemArena();
 
   RefreshConfig();
@@ -84,9 +79,7 @@ bool JitArm64::Init()
   SetOptimizationEnabled(true);
   gpr.Init(this);
   fpr.Init(this);
-
-  if (!blocks.Init())
-    return false;
+  blocks.Init();
 
   code_block.m_stats = &js.st;
   code_block.m_gpa = &js.gpa;
@@ -95,8 +88,6 @@ bool JitArm64::Init()
   InitBLROptimization();
 
   GenerateAsmAndResetFreeMemoryRanges();
-
-  return true;
 }
 
 void JitArm64::SetBlockLinkingEnabled(bool enabled)
@@ -215,9 +206,12 @@ void JitArm64::FreeRanges()
   // the local rangesets to allow overwriting them with new code.
   for (const auto& [from, to] : blocks.GetRangesToFreeNear())
   {
-    // This erase isn't just a matter of memory usage: because lookups first use lower_bound to get
-    // the entries of the currently running block, a destroyed block could interfere if left here.
-    m_fault_to_handler.erase(from);
+    const auto first_fastmem_area = m_fault_to_handler.upper_bound(from);
+    auto last_fastmem_area = first_fastmem_area;
+    const auto end = m_fault_to_handler.end();
+    while (last_fastmem_area != end && last_fastmem_area->first <= to)
+      ++last_fastmem_area;
+    m_fault_to_handler.erase(first_fastmem_area, last_fastmem_area);
 
     if (from < m_near_code_0.GetCodeEnd())
       m_free_ranges_near_0.insert(from, to);
@@ -262,8 +256,8 @@ void JitArm64::Shutdown()
 void JitArm64::FallBackToInterpreter(UGeckoInstruction inst)
 {
   FlushCarry();
-  gpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG, IgnoreDiscardedRegisters::Yes);
-  fpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG, IgnoreDiscardedRegisters::Yes);
+  gpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG, IgnoreDiscardedRegisters::Yes);
+  fpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG, IgnoreDiscardedRegisters::Yes);
 
   if (js.op->canEndBlock)
   {
@@ -283,12 +277,6 @@ void JitArm64::FallBackToInterpreter(UGeckoInstruction inst)
   gpr.ResetRegisters(js.op->regsOut);
   fpr.ResetRegisters(js.op->GetFregsOut());
   gpr.ResetCRRegisters(js.op->crOut);
-
-  // We must also update constant propagation
-  m_constant_propagation.ClearGPRs(js.op->regsOut);
-
-  if (js.op->opinfo->flags & FL_SET_MSR)
-    EmitUpdateMembase();
 
   if (js.op->canEndBlock)
   {
@@ -327,8 +315,8 @@ void JitArm64::FallBackToInterpreter(UGeckoInstruction inst)
 void JitArm64::HLEFunction(u32 hook_index)
 {
   FlushCarry();
-  gpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
-  fpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
+  gpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
+  fpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
 
   ABI_CallFunction(&HLE::ExecuteFromJIT, js.compilerPC, hook_index, &m_system);
 }
@@ -457,21 +445,6 @@ void JitArm64::MSRUpdated(u32 msr)
     MOVI2R(WA, feature_flags);
     STR(IndexType::Unsigned, WA, PPC_REG, PPCSTATE_OFF(feature_flags));
   }
-
-  // Call PageTableUpdatedFromJit if needed
-  if (UReg_MSR(msr).DR)
-  {
-    gpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
-    fpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
-
-    auto WA = gpr.GetScopedReg();
-
-    static_assert(PPCSTATE_OFF(pagetable_update_pending) < 0x1000);
-    LDRB(IndexType::Unsigned, WA, PPC_REG, PPCSTATE_OFF(pagetable_update_pending));
-    FixupBranch update_not_pending = CBZ(WA);
-    ABI_CallFunction(&PowerPC::MMU::PageTableUpdatedFromJit, &m_system.GetMMU());
-    SetJumpTarget(update_not_pending);
-  }
 }
 
 void JitArm64::MSRUpdated(ARM64Reg msr)
@@ -483,7 +456,7 @@ void JitArm64::MSRUpdated(ARM64Reg msr)
   auto& memory = m_system.GetMemory();
   MOVP2R(MEM_REG, jo.fastmem ? memory.GetLogicalBase() : memory.GetLogicalPageMappingsBase());
   MOVP2R(XA, jo.fastmem ? memory.GetPhysicalBase() : memory.GetPhysicalPageMappingsBase());
-  TST(msr, LogicalImm(1ULL << UReg_MSR{}.DR.StartBit(), GPRSize::B32));
+  TST(msr, LogicalImm(1 << (31 - 27), GPRSize::B32));
   CSEL(MEM_REG, MEM_REG, XA, CCFlags::CC_NEQ);
   STR(IndexType::Unsigned, MEM_REG, PPC_REG, PPCSTATE_OFF(mem_ptr));
 
@@ -497,18 +470,6 @@ void JitArm64::MSRUpdated(ARM64Reg msr)
   if (other_feature_flags != 0)
     ORR(WA, WA, LogicalImm(other_feature_flags, GPRSize::B32));
   STR(IndexType::Unsigned, WA, PPC_REG, PPCSTATE_OFF(feature_flags));
-
-  // Call PageTableUpdatedFromJit if needed
-  MOV(WA, msr);
-  gpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
-  fpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
-  FixupBranch dr_unset = TBZ(WA, u8(UReg_MSR{}.DR.StartBit()));
-  static_assert(PPCSTATE_OFF(pagetable_update_pending) < 0x1000);
-  LDRB(IndexType::Unsigned, WA, PPC_REG, PPCSTATE_OFF(pagetable_update_pending));
-  FixupBranch update_not_pending = CBZ(WA);
-  ABI_CallFunction(&PowerPC::MMU::PageTableUpdatedFromJit, &m_system.GetMMU());
-  SetJumpTarget(update_not_pending);
-  SetJumpTarget(dr_unset);
 }
 
 void JitArm64::WriteExit(u32 destination, bool LK, u32 exit_address_after_return,
@@ -1062,13 +1023,6 @@ void JitArm64::Jit(u32 em_address, bool clear_cache_and_retry_on_failure)
       b->far_begin = far_start;
       b->far_end = far_end;
 
-      if (!m_fault_to_handler_temp.empty())
-      {
-        // The copy from temp is intentional, to minimize allocations due to exceeded vector
-        // capacity.
-        m_fault_to_handler.emplace(near_start, m_fault_to_handler_temp);
-      }
-
       blocks.FinalizeBlock(*b, jo.enableBlocklink, code_block, m_code_buffer);
 
 #ifdef JIT_LOG_GENERATED_CODE
@@ -1181,7 +1135,6 @@ bool JitArm64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
   js.carryFlag = CarryFlag::InPPCState;
   js.numLoadStoreInst = 0;
   js.numFloatingPointInst = 0;
-  m_fault_to_handler_temp.clear();
 
   b->normalEntry = GetWritableCodePtr();
 
@@ -1189,8 +1142,7 @@ bool JitArm64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
   if (IsProfilingEnabled())
     ABI_CallFunction(&JitBlock::ProfileData::BeginProfiling, b->profile_data.get());
 
-  if (code_block.m_gqr_used.Count() == 1 &&
-      !js.pairedQuantizeAddresses.TestBit(js.blockStart / sizeof(UGeckoInstruction)))
+  if (code_block.m_gqr_used.Count() == 1 && !js.pairedQuantizeAddresses.contains(js.blockStart))
   {
     int gqr = *code_block.m_gqr_used.begin();
     if (!code_block.m_gqr_modified[gqr] && !GQR(m_ppc_state, gqr))
@@ -1214,9 +1166,7 @@ bool JitArm64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
   gpr.Start(js.gpa);
   fpr.Start(js.fpa);
 
-  m_constant_propagation.Clear();
-
-  if (!js.noSpeculativeConstantsAddresses.TestBit(js.blockStart / sizeof(UGeckoInstruction)))
+  if (!js.noSpeculativeConstantsAddresses.contains(js.blockStart))
   {
     IntializeSpeculativeConstants();
   }
@@ -1247,8 +1197,7 @@ bool JitArm64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
     {
       // Gather pipe writes using a non-immediate address are discovered by profiling.
       const u32 prev_address = m_code_buffer[i - 1].address;
-      bool gatherPipeIntCheck =
-          js.fifoWriteAddresses.TestBit(prev_address / sizeof(UGeckoInstruction));
+      bool gatherPipeIntCheck = js.fifoWriteAddresses.contains(prev_address);
 
       if (jo.optimizeGatherPipe &&
           (js.fifoBytesSinceCheck >= GPFifo::GATHER_PIPE_SIZE || js.mustCheckFifo))
@@ -1309,13 +1258,16 @@ bool JitArm64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
 
     if (op.skip)
     {
-      if (IsBranchWatchEnabled())
+      if (IsDebuggingEnabled())
       {
         // The only thing that currently sets op.skip is the BLR following optimization.
         // If any non-branch instruction starts setting that too, this will need to be changed.
         ASSERT(op.inst.hex == 0x4e800020);
-        WriteBranchWatch<true>(op.address, op.branchTo, op.inst, gpr.GetCallerSavedUsed(),
-                               fpr.GetCallerSavedUsed());
+        const auto bw_reg_a = gpr.GetScopedReg(), bw_reg_b = gpr.GetScopedReg();
+        const BitSet32 gpr_caller_save =
+            gpr.GetCallerSavedUsed() & ~BitSet32{DecodeReg(bw_reg_a), DecodeReg(bw_reg_b)};
+        WriteBranchWatch<true>(op.address, op.branchTo, op.inst, bw_reg_a, bw_reg_b,
+                               gpr_caller_save, fpr.GetCallerSavedUsed());
       }
     }
     else
@@ -1324,8 +1276,8 @@ bool JitArm64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
           m_system.GetPowerPC().GetBreakPoints().IsAddressBreakPoint(op.address))
       {
         FlushCarry();
-        gpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
-        fpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
+        gpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
+        fpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
 
         static_assert(PPCSTATE_OFF(pc) <= 252);
         static_assert(PPCSTATE_OFF(pc) + 4 == PPCSTATE_OFF(npc));
@@ -1336,7 +1288,7 @@ bool JitArm64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
 
         LDR(IndexType::Unsigned, ARM64Reg::W0, ARM64Reg::X0,
             MOVPage2R(ARM64Reg::X0, cpu.GetStatePtr()));
-        static_assert(std::to_underlying(CPU::State::Running) == 0);
+        static_assert(Common::ToUnderlying(CPU::State::Running) == 0);
         FixupBranch no_breakpoint = CBZ(ARM64Reg::W0);
 
         Cleanup();
@@ -1384,40 +1336,11 @@ bool JitArm64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
       if (bJITRegisterCacheOff)
       {
         FlushCarry();
-        gpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
-        fpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
-        m_constant_propagation.Clear();
-
-        CompileInstruction(op);
+        gpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
+        fpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
       }
-      else
-      {
-        const JitCommon::ConstantPropagationResult constant_propagation_result =
-            m_constant_propagation.EvaluateInstruction(op.inst, opinfo->flags);
 
-        if (!constant_propagation_result.instruction_fully_executed)
-          CompileInstruction(op);
-
-        m_constant_propagation.Apply(constant_propagation_result);
-
-        if (constant_propagation_result.gpr >= 0)
-        {
-          // Mark the GPR as dirty in the register cache
-          gpr.SetImmediate(constant_propagation_result.gpr, constant_propagation_result.gpr_value);
-        }
-
-        if (constant_propagation_result.instruction_fully_executed)
-        {
-          if (constant_propagation_result.carry)
-            ComputeCarry(*constant_propagation_result.carry);
-
-          if (constant_propagation_result.overflow)
-            GenerateConstantOverflow(*constant_propagation_result.overflow);
-
-          if (constant_propagation_result.compute_rc)
-            ComputeRC0(constant_propagation_result.gpr_value);
-        }
-      }
+      CompileInstruction(op);
 
       js.fpr_is_store_safe = op.fprIsStoreSafeAfterInst;
 
@@ -1431,16 +1354,9 @@ bool JitArm64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
         fpr.DiscardRegisters(op.fprDiscardable);
         gpr.DiscardCRRegisters(op.crDiscardable);
       }
-      gpr.FlushRegisters(~(op.gprWillBeRead | op.gprWillBeWritten) & (op.regsIn | op.regsOut),
-                         FlushMode::Full);
-      fpr.FlushRegisters(~(op.fprWillBeRead | op.fprWillBeWritten) &
-                             (op.fregsIn | op.GetFregsOut()),
-                         FlushMode::Full);
-      gpr.FlushCRRegisters(~(op.crWillBeRead | op.crWillBeWritten) & (op.crIn | op.crOut),
-                           FlushMode::Full);
-      gpr.FlushRegisters(~op.gprWillBeWritten & op.regsOut, FlushMode::Undirty);
-      fpr.FlushRegisters(~op.fprWillBeWritten & op.GetFregsOut(), FlushMode::Undirty);
-      gpr.FlushCRRegisters(~op.crWillBeWritten & op.crOut, FlushMode::Undirty);
+      gpr.StoreRegisters(~op.gprInUse & (op.regsIn | op.regsOut));
+      fpr.StoreRegisters(~op.fprInUse & (op.fregsIn | op.GetFregsOut()));
+      gpr.StoreCRRegisters(~op.crInUse & (op.crIn | op.crOut));
 
       if (opinfo->flags & FL_LOADSTORE)
         ++js.numLoadStoreInst;
@@ -1455,8 +1371,8 @@ bool JitArm64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
 
   if (code_block.m_broken)
   {
-    gpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
-    fpr.Flush(FlushMode::Full, ARM64Reg::INVALID_REG);
+    gpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
+    fpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
     WriteExit(nextPC);
   }
 

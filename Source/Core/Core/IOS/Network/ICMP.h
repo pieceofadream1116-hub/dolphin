@@ -4,7 +4,7 @@
 #pragma once
 
 #ifdef _WIN32
-#include <winsock2.h>
+#include <WinSock2.h>
 #else
 #include <netinet/in.h>
 #endif

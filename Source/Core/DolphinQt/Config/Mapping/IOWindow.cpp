@@ -356,10 +356,6 @@ void IOWindow::CreateMainLayout()
   m_functions_combo->addItem(QStringLiteral("atan2"));
   m_functions_combo->addItem(QStringLiteral("sqrt"));
   m_functions_combo->addItem(QStringLiteral("pow"));
-  m_functions_combo->addItem(QStringLiteral("floor"));
-  m_functions_combo->addItem(QStringLiteral("ceil"));
-  m_functions_combo->addItem(QStringLiteral("round"));
-  m_functions_combo->addItem(QStringLiteral("trunc"));
   m_functions_combo->addItem(QStringLiteral("min"));
   m_functions_combo->addItem(QStringLiteral("max"));
   m_functions_combo->addItem(QStringLiteral("clamp"));
@@ -825,7 +821,7 @@ static void PaintStateIndicator(QPainter& painter, const QRect& region, ControlS
   QRect meter_region = region;
   meter_region.setWidth(region.width() * std::clamp(state, 0.0, 1.0));
 
-  // Create a temporary indicator object to retrieve color constants.
+  // Create a temporary indicator object to retreive color constants.
   MappingIndicator indicator;
 
   // Normal text.

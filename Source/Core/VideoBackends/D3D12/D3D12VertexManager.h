@@ -30,13 +30,11 @@ protected:
   void ResetBuffer(u32 vertex_stride) override;
   void CommitBuffer(u32 num_vertices, u32 vertex_stride, u32 num_indices, u32* out_base_vertex,
                     u32* out_base_index) override;
-  void BindCommittedBuffer(u32 vertex_stride) override;
   void UploadUniforms() override;
 
   void UpdateVertexShaderConstants();
   void UpdateGeometryShaderConstants();
   void UpdatePixelShaderConstants();
-  void UpdateCustomShaderConstants();
 
   // Allocates storage in the uniform buffer of the specified size. If this storage cannot be
   // allocated immediately, the current command buffer will be submitted and all stage's
