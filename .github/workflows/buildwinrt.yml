@@ -56,10 +56,30 @@ jobs:
         $pw = ConvertTo-SecureString -String "dolphinuwp" -Force -AsPlainText
         Export-PfxCertificate -Cert $cert -FilePath Source\DolphinWinRT\DolphinWinRT_TemporaryKey.pfx -Password $pw | Out-Null
 
+    # The app project packs "Sys\**" but only copies Data\Sys there in its pre-build step, after
+    # the file list is made, so on a fresh checkout the package had no Sys folder and Dolphin
+    # closed right after the splash screen. Put it in place first.
+    - name: Copy Sys into the app project
+      shell: pwsh
+      run: |
+        robocopy Data\Sys Source\DolphinWinRT\Sys /E /XF *.vsh /R:0 /W:0 /NFL /NDL /NJH
+        if ($LASTEXITCODE -ge 8) { exit $LASTEXITCODE }
+        $count = (Get-ChildItem -Recurse -File Source\DolphinWinRT\Sys).Count
+        Write-Host "Sys files: $count"
+        exit 0
+
     # Only the Xbox app (and what it needs): the desktop tools in the solution don't build here.
     - name: Build the project
       run: msbuild Source/dolphin-emu.sln /m /p:PlatformToolset=v143 /t:DolphinWinRT /p:Configuration="${{ matrix.configuration }}" /p:Platform=x64 /p:RestorePackagesConfig=true /p:PackageCertificatePassword=dolphinuwp
   
+    - name: Check the package has Dolphin's Sys files
+      shell: pwsh
+      run: |
+        $bundle = Get-ChildItem -Recurse Source\AppPackages -Filter *.msixbundle | Select-Object -First 1
+        $mb = [math]::Round($bundle.Length / 1MB, 1)
+        Write-Host "$($bundle.Name): $mb MB"
+        if ($bundle.Length -lt 30MB) { Write-Host "Package is too small - Sys folder missing?"; exit 1 }
+
     - name: Upload APPX file
       if: matrix.configuration == 'Release'
       uses: actions/upload-artifact@v4
