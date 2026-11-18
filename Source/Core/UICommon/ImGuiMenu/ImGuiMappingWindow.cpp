@@ -87,6 +87,9 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
         ImGui::End();
         return;
       }
+      // nothing was pressed in time: stop waiting (before, it waited forever and the menus
+      // stayed locked)
+      state->capturingRef = nullptr;
       state->mappingInputDetector.reset();
     }
     ImGui::End();
@@ -102,6 +105,18 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
   if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
       ImGui::IsKeyPressed(ImGuiKey_Escape))
     state->showMappingWindow = false;
+
+  // easy way out at the top too: saves and closes (B or Menu do the same)
+  if (ImGui::Button("Done", ImVec2(160, 0)))
+  {
+    config->SaveConfig();
+    state->showMappingWindow = false;
+    ImGui::End();
+    return;
+  }
+  ImGui::SameLine();
+  ImGui::TextDisabled("B or Menu: save and close");
+  ImGui::Spacing();
 
   if (ImGui::BeginTabBar("MappingTabs"))
   {

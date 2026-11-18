@@ -1122,6 +1122,25 @@ void ImGuiFrontend::PopulateControls()
   }
 }
 
+// Leave the controller mapping screen: stop waiting for a button, save the mapping, close it
+void ImGuiFrontend::CloseMappingWindow()
+{
+  if (!m_state.showMappingWindow && !m_state.capturingRef)
+    return;
+  m_state.capturingRef = nullptr;
+  m_state.mappingInputDetector.reset();
+  if (m_state.showMappingWindow)
+  {
+    InputConfig* config = m_state.mappingWindowIsWii ? Wiimote::GetConfig() : Pad::GetConfig();
+    if (config)
+      config->SaveConfig();
+  }
+  m_state.showMappingWindow = false;
+  ImGuiIO& io = ImGui::GetIO();
+  io.ConfigFlags |= (ImGuiConfigFlags_NavEnableGamepad | ImGuiConfigFlags_NavEnableKeyboard);
+  io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
+}
+
 void ImGuiFrontend::RefreshControls(bool updateGameSelection)
 {
   if (m_controllers.empty())
@@ -1406,9 +1425,20 @@ FrontendResult ImGuiFrontend::RunMainLoop()
       {
         if (TryInput("Menu", device))
         {
-          if (!m_state.menuPressed && !m_state.showListView && !g_netplay_dialog)
+          if (!m_state.menuPressed && m_state.showSettingsWindow && m_state.showMappingWindow)
+          {
+            // Menu backs out of the controller mapping screen first (saving it)
+            CloseMappingWindow();
+            m_state.menuPressed = true;
+          }
+          else if (!m_state.menuPressed && !m_state.showListView && !g_netplay_dialog)
           {
             m_state.showSettingsWindow = !m_state.showSettingsWindow;
+            if (!m_state.showSettingsWindow)
+            {
+              CloseMappingWindow();
+              Config::Save();
+            }
             m_state.menuPressed = true;
             LoadGameList();
             FilterGamesForCategory();
@@ -1571,6 +1601,24 @@ FrontendResult ImGuiFrontend::RunMainLoop()
         DrawSettingsMenu(&m_state, m_frame_scale);
       }
       ImGui::End();
+
+      // B backs out: first the controller mapping screen, then the settings window. Not while
+      // a drop-down list is open or a box is being edited (B closes those itself).
+      if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) && !m_state.controlsDisabled &&
+          !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
+          !ImGui::IsAnyItemActive())
+      {
+        if (m_state.showMappingWindow)
+        {
+          if (!m_state.capturingRef)
+            CloseMappingWindow();
+        }
+        else
+        {
+          m_state.showSettingsWindow = false;
+          Config::Save();
+        }
+      }
     }
     else if (m_state.showPropertiesWindow && m_state.propertiesGame)
     {

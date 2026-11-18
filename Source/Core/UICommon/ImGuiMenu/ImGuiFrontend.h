@@ -212,6 +212,7 @@ private:
   int m_grid_side = 0;     // which side button (0 = top)
   bool m_grid_a_held = false;
   bool GridHorizontal(int direction);
+  void CloseMappingWindow();
   void GridActivateSide();
   void DrawCarouselBackground();
   float GetCarouselItemPosition(int index, int center_index);
