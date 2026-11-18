@@ -199,6 +199,20 @@ void CreateInterfaceTab(UIState* state)
 
   ImGui::Spacing();
 
+  bool gridLayout = Config::Get(Config::FRONTEND_GRID_LAYOUT);
+  if (ImGui::Checkbox("Box Art Grid Home Screen", &gridLayout))
+  {
+    Config::SetBaseOrCurrent(Config::FRONTEND_GRID_LAYOUT, gridLayout);
+    Config::Save();
+  }
+  if (ImGui::IsItemHovered())
+  {
+    ImGui::SetTooltip("Show games as a grid of box art.\n"
+                      "Turn off for the original scrolling carousel.");
+  }
+
+  ImGui::Spacing();
+
   if (ImGui::BeginCombo("Theme", m_selected_theme->GetName().c_str()))
   {
     for (auto& theme : m_themes)

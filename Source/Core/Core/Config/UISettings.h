@@ -26,6 +26,7 @@ extern const Info<int> FRONTEND_COLOR_THEME;
 extern const Info<int> FRONTEND_GAME_TITLE_COLOR;
 extern const Info<int> FRONTEND_LAST_CATEGORY;
 extern const Info<int> FRONTEND_LAST_GAME;
+extern const Info<bool> FRONTEND_GRID_LAYOUT;
 
 
 }  // namespace Config

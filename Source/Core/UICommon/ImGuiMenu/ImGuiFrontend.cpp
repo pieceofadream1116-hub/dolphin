@@ -15,6 +15,9 @@
 #include <chrono>
 #include <future>
 #include <cmath>
+#include <ctime>
+#include <algorithm>
+#include <cfloat>
 #include <format>
 
 // Windows/System
@@ -1131,6 +1134,54 @@ void ImGuiFrontend::RefreshControls(bool updateGameSelection)
 
         input_handled = true;
       }
+      else if (Config::Get(Config::FRONTEND_GRID_LAYOUT) && !m_state.showListView &&
+               TryInput("Pad N", device))
+      {
+        if (!m_direction_pressed)
+        {
+          MoveGridSelection(-m_grid_columns);
+          m_direction_pressed = true;
+          break;
+        }
+
+        input_handled = true;
+      }
+      else if (Config::Get(Config::FRONTEND_GRID_LAYOUT) && !m_state.showListView &&
+               TryInput("Pad S", device))
+      {
+        if (!m_direction_pressed)
+        {
+          MoveGridSelection(m_grid_columns);
+          m_direction_pressed = true;
+          break;
+        }
+
+        input_handled = true;
+      }
+      else if (Config::Get(Config::FRONTEND_GRID_LAYOUT) && !m_state.showListView &&
+               TryInput("Left Y+", device))
+      {
+        if (timeSinceLastInput > 200L)
+        {
+          MoveGridSelection(-m_grid_columns);
+          m_scroll_last = std::chrono::high_resolution_clock::now();
+          break;
+        }
+
+        input_handled = true;
+      }
+      else if (Config::Get(Config::FRONTEND_GRID_LAYOUT) && !m_state.showListView &&
+               TryInput("Left Y-", device))
+      {
+        if (timeSinceLastInput > 200L)
+        {
+          MoveGridSelection(m_grid_columns);
+          m_scroll_last = std::chrono::high_resolution_clock::now();
+          break;
+        }
+
+        input_handled = true;
+      }
       else if (TryInput("Bumper L", device))
       {
         if (timeSinceLastInput > 250L)
@@ -1343,10 +1394,21 @@ FrontendResult ImGuiFrontend::RunMainLoop()
                         ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar |
                         ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav))
    {
+      if (Config::Get(Config::FRONTEND_GRID_LAYOUT))
+      {
+        DrawGridBackground();
+      }
+      else
+      {
         ImGui::Image((ImTextureID)(intptr_t)m_selected_theme->GetBackground(m_state.currentBG).get(),
                     ImGui::GetIO().DisplaySize);
+      }
 
-      if (m_state.showListView)
+      if (Config::Get(Config::FRONTEND_GRID_LAYOUT))
+      {
+        // the grid draws its own screen furniture
+      }
+      else if (m_state.showListView)
       {
         ImGui::SetCursorPos(ImVec2(0, 0));
         ImGui::Image((ImTextureID)(intptr_t)m_selected_theme->GetBackground(BG_List_UI).get(),
@@ -1418,7 +1480,7 @@ FrontendResult ImGuiFrontend::RunMainLoop()
     {
       m_state.currentBG = static_cast<ThemeBG>(m_ccat);
 
-      selection = CreateMainPage();
+      selection = Config::Get(Config::FRONTEND_GRID_LAYOUT) ? CreateGridPage() : CreateMainPage();
       if (selection.game_result != nullptr)
       {
         Config::SetBase(Config::FRONTEND_LAST_GAME, (int)m_selectedGameIdx);
@@ -1489,6 +1551,395 @@ FrontendResult ImGuiFrontend::CreateMainPage()
   io.DeltaTime = time_diff_secs;
 
   return FrontendResult();  // keep running
+}
+
+//============================================================
+// Box-art grid home screen
+//
+// A console-style home screen: a soft lavender background, the
+// game covers in rounded tiles (move with the D-pad or left stick,
+// A to play), a clock, the controller count, and round buttons down
+// both sides that show which controller button does what.
+//============================================================
+
+namespace
+{
+ImU32 GridInk(int alpha = 255)
+{
+  return IM_COL32(52, 52, 110, alpha);
+}
+
+ImU32 GridPill(int alpha = 170)
+{
+  return IM_COL32(255, 255, 255, alpha);
+}
+
+ImU32 GridAccent(int alpha = 255)
+{
+  return IM_COL32(236, 72, 104, alpha);
+}
+
+void GridTextCentered(ImDrawList* dl, ImVec2 center, ImU32 col, const char* text, float scale = 1.0f)
+{
+  ImFont* font = ImGui::GetFont();
+  const float size = ImGui::GetFontSize() * scale;
+  const ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, 0.0f, text);
+  dl->AddText(font, size, ImVec2(center.x - ts.x * 0.5f, center.y - ts.y * 0.5f), col, text);
+}
+
+enum class GridIcon
+{
+  Home,
+  List,
+  Info,
+  Gear,
+  Netplay,
+  Swap,
+};
+
+void DrawGridIcon(ImDrawList* dl, GridIcon icon, ImVec2 c, float r, ImU32 col)
+{
+  const float t = std::max(2.0f, r * 0.12f);
+  switch (icon)
+  {
+  case GridIcon::Home:
+    dl->AddTriangle(ImVec2(c.x - r * 0.75f, c.y - r * 0.05f), ImVec2(c.x, c.y - r * 0.7f),
+                    ImVec2(c.x + r * 0.75f, c.y - r * 0.05f), col, t);
+    dl->AddRect(ImVec2(c.x - r * 0.5f, c.y - r * 0.05f), ImVec2(c.x + r * 0.5f, c.y + r * 0.6f),
+                col, r * 0.08f, 0, t);
+    dl->AddRect(ImVec2(c.x - r * 0.15f, c.y + r * 0.2f), ImVec2(c.x + r * 0.15f, c.y + r * 0.6f),
+                col, 0.0f, 0, t * 0.8f);
+    break;
+  case GridIcon::List:
+    for (int i = -1; i <= 1; ++i)
+    {
+      const float y = c.y + i * r * 0.4f;
+      dl->AddCircleFilled(ImVec2(c.x - r * 0.55f, y), t * 0.9f, col);
+      dl->AddLine(ImVec2(c.x - r * 0.3f, y), ImVec2(c.x + r * 0.65f, y), col, t);
+    }
+    break;
+  case GridIcon::Info:
+    dl->AddCircle(c, r * 0.7f, col, 32, t);
+    dl->AddCircleFilled(ImVec2(c.x, c.y - r * 0.32f), t * 0.9f, col);
+    dl->AddLine(ImVec2(c.x, c.y - r * 0.1f), ImVec2(c.x, c.y + r * 0.38f), col, t * 1.1f);
+    break;
+  case GridIcon::Gear:
+    for (int i = 0; i < 8; ++i)
+    {
+      const float a = i * 3.14159265f / 4.0f;
+      dl->AddLine(ImVec2(c.x + std::cos(a) * r * 0.45f, c.y + std::sin(a) * r * 0.45f),
+                  ImVec2(c.x + std::cos(a) * r * 0.75f, c.y + std::sin(a) * r * 0.75f), col,
+                  t * 1.6f);
+    }
+    dl->AddCircleFilled(c, r * 0.5f, col, 32);
+    dl->AddCircleFilled(c, r * 0.22f, GridPill(255), 24);
+    break;
+  case GridIcon::Netplay:
+    dl->AddCircle(ImVec2(c.x - r * 0.35f, c.y - r * 0.15f), r * 0.25f, col, 24, t);
+    dl->AddCircle(ImVec2(c.x + r * 0.35f, c.y - r * 0.15f), r * 0.25f, col, 24, t);
+    dl->AddBezierCubic(ImVec2(c.x - r * 0.75f, c.y + r * 0.6f), ImVec2(c.x - r * 0.7f, c.y + r * 0.15f),
+                       ImVec2(c.x - r * 0.0f, c.y + r * 0.15f), ImVec2(c.x + r * 0.05f, c.y + r * 0.6f),
+                       col, t);
+    dl->AddBezierCubic(ImVec2(c.x - r * 0.05f, c.y + r * 0.6f), ImVec2(c.x + r * 0.0f, c.y + r * 0.15f),
+                       ImVec2(c.x + r * 0.7f, c.y + r * 0.15f), ImVec2(c.x + r * 0.75f, c.y + r * 0.6f),
+                       col, t);
+    break;
+  case GridIcon::Swap:
+    dl->AddLine(ImVec2(c.x - r * 0.6f, c.y - r * 0.25f), ImVec2(c.x + r * 0.6f, c.y - r * 0.25f), col, t);
+    dl->AddTriangleFilled(ImVec2(c.x + r * 0.7f, c.y - r * 0.25f), ImVec2(c.x + r * 0.4f, c.y - r * 0.48f),
+                          ImVec2(c.x + r * 0.4f, c.y - r * 0.02f), col);
+    dl->AddLine(ImVec2(c.x + r * 0.6f, c.y + r * 0.3f), ImVec2(c.x - r * 0.6f, c.y + r * 0.3f), col, t);
+    dl->AddTriangleFilled(ImVec2(c.x - r * 0.7f, c.y + r * 0.3f), ImVec2(c.x - r * 0.4f, c.y + r * 0.07f),
+                          ImVec2(c.x - r * 0.4f, c.y + r * 0.53f), col);
+    break;
+  }
+}
+
+// A round side button: an icon in a white bubble, and which controller button does it underneath.
+void DrawGridSideButton(ImDrawList* dl, ImVec2 c, float scale, GridIcon icon, const char* hint)
+{
+  const float r = 46.0f * scale;
+  dl->AddCircleFilled(ImVec2(c.x, c.y + 3.0f * scale), r, IM_COL32(60, 50, 160, 40), 48);
+  dl->AddCircleFilled(c, r, GridPill(215), 48);
+  DrawGridIcon(dl, icon, c, r * 0.62f, GridInk());
+  GridTextCentered(dl, ImVec2(c.x, c.y + r + 18.0f * scale), GridInk(220), hint, 0.75f);
+}
+
+const char* GridCategoryName(int category)
+{
+  switch (category)
+  {
+  case CWii:
+    return "Wii";
+  case CGC:
+    return "GameCube";
+  case COther:
+    return "Other";
+  default:
+    return "All Games";
+  }
+}
+}  // namespace
+
+void ImGuiFrontend::MoveGridSelection(int delta)
+{
+  if (m_displayed_games.empty())
+    return;
+  const int count = static_cast<int>(m_displayed_games.size());
+  int index = m_selectedGameIdx + delta;
+  if (index < 0)
+    index = (m_selectedGameIdx > 0) ? 0 : m_selectedGameIdx;
+  if (index >= count)
+    index = (m_selectedGameIdx < count - 1) ? count - 1 : m_selectedGameIdx;
+  SmoothScrollToGame(index);
+}
+
+void ImGuiFrontend::DrawGridBackground()
+{
+  ImDrawList* dl = ImGui::GetBackgroundDrawList();
+  const ImVec2 size = ImGui::GetIO().DisplaySize;
+  const float s = m_frame_scale;
+
+  // soft lavender-to-periwinkle wash
+  dl->AddRectFilledMultiColor(ImVec2(0, 0), size, IM_COL32(205, 196, 255, 255),
+                              IM_COL32(170, 178, 255, 255), IM_COL32(118, 128, 246, 255),
+                              IM_COL32(150, 140, 250, 255));
+
+  // a few faint shapes drifting slowly, so the screen doesn't look flat
+  const float time = static_cast<float>(ImGui::GetTime());
+  struct Blob
+  {
+    float x, y, w, h, speed;
+    bool round;
+  };
+  static const Blob blobs[] = {
+      {0.08f, 0.78f, 120, 70, 0.25f, false}, {0.22f, 0.30f, 40, 40, 0.4f, true},
+      {0.38f, 0.88f, 90, 90, 0.2f, true},    {0.55f, 0.18f, 150, 80, 0.3f, false},
+      {0.70f, 0.70f, 60, 60, 0.35f, true},   {0.86f, 0.40f, 110, 60, 0.22f, false},
+      {0.93f, 0.85f, 70, 70, 0.28f, true},   {0.30f, 0.60f, 70, 40, 0.33f, false},
+  };
+  for (const Blob& b : blobs)
+  {
+    const float bob = std::sin(time * b.speed + b.x * 10.0f) * 10.0f * s;
+    const ImVec2 c(b.x * size.x, b.y * size.y + bob);
+    if (b.round)
+    {
+      dl->AddCircle(c, b.w * 0.5f * s, IM_COL32(255, 255, 255, 45), 48, 4.0f * s);
+    }
+    else
+    {
+      const ImVec2 half(b.w * 0.5f * s, b.h * 0.5f * s);
+      dl->AddRect(ImVec2(c.x - half.x, c.y - half.y), ImVec2(c.x + half.x, c.y + half.y),
+                  IM_COL32(255, 255, 255, 40), half.y, 0, 4.0f * s);
+    }
+  }
+}
+
+void ImGuiFrontend::DrawGridChrome()
+{
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  const ImVec2 size = ImGui::GetIO().DisplaySize;
+  const float s = m_frame_scale;
+  const float margin = 40.0f * s;
+
+  // clock (top left)
+  {
+    std::time_t now = std::time(nullptr);
+    std::tm local{};
+    localtime_s(&local, &now);
+    char time_text[16], date_text[32];
+    std::strftime(time_text, sizeof(time_text), "%H:%M", &local);
+    std::strftime(date_text, sizeof(date_text), "%d/%m/%Y", &local);
+
+    const ImVec2 a(margin, margin * 0.6f), b(margin + 200.0f * s, margin * 0.6f + 92.0f * s);
+    dl->AddRectFilled(a, b, GridPill(), 28.0f * s);
+    GridTextCentered(dl, ImVec2((a.x + b.x) * 0.5f, a.y + 34.0f * s), GridInk(), time_text, 1.1f);
+    GridTextCentered(dl, ImVec2((a.x + b.x) * 0.5f, a.y + 68.0f * s), GridInk(170), date_text, 0.6f);
+  }
+
+  // title and category (top middle)
+  {
+    const ImVec2 c(size.x * 0.5f, margin * 0.6f + 46.0f * s);
+    dl->AddCircleFilled(ImVec2(c.x, c.y + 3.0f * s), 44.0f * s, IM_COL32(60, 50, 160, 40), 48);
+    dl->AddCircleFilled(c, 44.0f * s, GridPill(230), 48);
+    dl->AddCircle(c, 32.0f * s, GridAccent(), 48, 5.0f * s);
+    GridTextCentered(dl, c, GridAccent(), "D", 1.1f);
+    GridTextCentered(dl, ImVec2(c.x, c.y + 66.0f * s), GridInk(210), GridCategoryName(m_ccat), 0.7f);
+  }
+
+  // controllers (top right)
+  {
+    int pads = 0;
+    for (const auto& device : m_controllers)
+      if (device && device->IsValid())
+        ++pads;
+    const std::string text = fmt::format("{} pad{}", pads, pads == 1 ? "" : "s");
+
+    const ImVec2 a(size.x - margin - 170.0f * s, margin * 0.6f),
+        b(size.x - margin, margin * 0.6f + 92.0f * s);
+    dl->AddRectFilled(a, b, GridPill(), 28.0f * s);
+    const ImVec2 pad_c((a.x + b.x) * 0.5f, a.y + 36.0f * s);
+    dl->AddRectFilled(ImVec2(pad_c.x - 30.0f * s, pad_c.y - 14.0f * s),
+                      ImVec2(pad_c.x + 30.0f * s, pad_c.y + 14.0f * s), GridInk(), 14.0f * s);
+    dl->AddCircleFilled(ImVec2(pad_c.x - 14.0f * s, pad_c.y), 5.0f * s, GridPill(255));
+    dl->AddCircleFilled(ImVec2(pad_c.x + 14.0f * s, pad_c.y), 5.0f * s, GridPill(255));
+    GridTextCentered(dl, ImVec2(pad_c.x, a.y + 70.0f * s), GridInk(170), text.c_str(), 0.6f);
+  }
+
+  // side buttons: what each controller button does
+  const float side_x_left = margin + 50.0f * s;
+  const float side_x_right = size.x - margin - 50.0f * s;
+  const float top = size.y * 0.30f;
+  const float step = 150.0f * s;
+  DrawGridSideButton(dl, ImVec2(side_x_left, top), s, GridIcon::Home, "LB / RB");
+  DrawGridSideButton(dl, ImVec2(side_x_left, top + step), s, GridIcon::List, "Y  list");
+  DrawGridSideButton(dl, ImVec2(side_x_left, top + step * 2), s, GridIcon::Gear, "Menu");
+  DrawGridSideButton(dl, ImVec2(side_x_right, top), s, GridIcon::Info, "X  game");
+  DrawGridSideButton(dl, ImVec2(side_x_right, top + step), s, GridIcon::Netplay, "View");
+  DrawGridSideButton(dl, ImVec2(side_x_right, top + step * 2), s, GridIcon::Swap, "LT / RT");
+
+  // selected game's name (bottom middle)
+  if (!m_displayed_games.empty() && m_selectedGameIdx >= 0 &&
+      m_selectedGameIdx < static_cast<int>(m_displayed_games.size()))
+  {
+    const std::string name = m_displayed_games[m_selectedGameIdx]->GetName(m_title_database);
+    ImFont* font = ImGui::GetFont();
+    const float fs = ImGui::GetFontSize() * 0.85f;
+    const ImVec2 ts = font->CalcTextSizeA(fs, FLT_MAX, 0.0f, name.c_str());
+    const ImVec2 c(size.x * 0.5f, size.y - margin - 34.0f * s);
+    const ImVec2 a(c.x - ts.x * 0.5f - 36.0f * s, c.y - ts.y * 0.5f - 14.0f * s);
+    const ImVec2 b(c.x + ts.x * 0.5f + 36.0f * s, c.y + ts.y * 0.5f + 14.0f * s);
+    dl->AddRectFilled(a, b, GridPill(225), (b.y - a.y) * 0.5f);
+    dl->AddText(font, fs, ImVec2(c.x - ts.x * 0.5f, c.y - ts.y * 0.5f), GridInk(), name.c_str());
+  }
+}
+
+FrontendResult ImGuiFrontend::CreateGridPage()
+{
+  if (m_last_category != m_ccat)
+  {
+    m_last_category = m_ccat;
+    FilterGamesForCategory();
+    m_selectedGameIdx = 0;
+  }
+
+  const ImVec2 size = ImGui::GetIO().DisplaySize;
+  const float s = m_frame_scale;
+
+  DrawGridChrome();
+
+  if (m_displayed_games.empty())
+  {
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    const ImVec2 a(size.x * 0.5f - 420.0f * s, size.y * 0.5f - 80.0f * s);
+    const ImVec2 b(size.x * 0.5f + 420.0f * s, size.y * 0.5f + 80.0f * s);
+    dl->AddRectFilled(a, b, GridPill(200), 30.0f * s);
+    GridTextCentered(dl, ImVec2(size.x * 0.5f, size.y * 0.5f - 22.0f * s), GridInk(), "No games yet");
+    GridTextCentered(dl, ImVec2(size.x * 0.5f, size.y * 0.5f + 26.0f * s), GridInk(180),
+                     "Press Menu, open Paths, then Add Path", 0.7f);
+    return FrontendResult();
+  }
+
+  if (m_selectedGameIdx < 0)
+    m_selectedGameIdx = 0;
+  if (m_selectedGameIdx >= static_cast<int>(m_displayed_games.size()))
+    m_selectedGameIdx = static_cast<int>(m_displayed_games.size()) - 1;
+
+  long timeSinceInit = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::high_resolution_clock::now() - m_time_since_init)
+                           .count();
+  if (ImGui::IsKeyDown(ImGuiKey_GamepadFaceDown) && timeSinceInit > 1500)
+    return FrontendResult(m_displayed_games[m_selectedGameIdx]);
+
+  // layout: tiles between the side buttons, under the top bar
+  const float side = 170.0f * s;
+  const float top = 200.0f * s;
+  const float bottom = 130.0f * s;
+  const float tile_w = 200.0f * s;
+  const float tile_h = 250.0f * s;
+  const float gap = 28.0f * s;
+  const float avail_w = size.x - side * 2.0f;
+  const float avail_h = size.y - top - bottom;
+
+  m_grid_columns = std::max(1, static_cast<int>((avail_w + gap) / (tile_w + gap)));
+  const int visible_rows = std::max(1, static_cast<int>((avail_h + gap) / (tile_h + gap)));
+  const int count = static_cast<int>(m_displayed_games.size());
+  const int rows = (count + m_grid_columns - 1) / m_grid_columns;
+
+  // keep the selected row on screen
+  static int first_row = 0;
+  const int sel_row = m_selectedGameIdx / m_grid_columns;
+  if (sel_row < first_row)
+    first_row = sel_row;
+  if (sel_row >= first_row + visible_rows)
+    first_row = sel_row - visible_rows + 1;
+  first_row = std::clamp(first_row, 0, std::max(0, rows - visible_rows));
+
+  const float grid_w = m_grid_columns * tile_w + (m_grid_columns - 1) * gap;
+  const float start_x = (size.x - grid_w) * 0.5f;
+
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  for (int row = first_row; row < std::min(rows, first_row + visible_rows); ++row)
+  {
+    for (int col = 0; col < m_grid_columns; ++col)
+    {
+      const int index = row * m_grid_columns + col;
+      if (index >= count)
+        break;
+
+      const bool selected = index == m_selectedGameIdx;
+      const float grow = selected ? 1.06f : 1.0f;
+      const ImVec2 c(start_x + col * (tile_w + gap) + tile_w * 0.5f,
+                     top + (row - first_row) * (tile_h + gap) + tile_h * 0.5f);
+      const ImVec2 half(tile_w * 0.5f * grow, tile_h * 0.5f * grow);
+      const ImVec2 a(c.x - half.x, c.y - half.y), b(c.x + half.x, c.y + half.y);
+      const float rounding = 22.0f * s;
+
+      // tile
+      dl->AddRectFilled(ImVec2(a.x, a.y + 5.0f * s), ImVec2(b.x, b.y + 5.0f * s),
+                        IM_COL32(60, 50, 160, selected ? 70 : 35), rounding);
+      dl->AddRectFilled(a, b, GridPill(selected ? 240 : 190), rounding);
+
+      // cover, keeping its shape
+      const float pad = 16.0f * s;
+      float cover_h = (b.y - a.y) - pad * 2.0f;
+      float cover_w = cover_h * (146.0f / 204.0f);
+      if (cover_w > (b.x - a.x) - pad * 2.0f)
+      {
+        cover_w = (b.x - a.x) - pad * 2.0f;
+        cover_h = cover_w * (204.0f / 146.0f);
+      }
+      const ImVec2 ca(c.x - cover_w * 0.5f, c.y - cover_h * 0.5f);
+      const ImVec2 cb(c.x + cover_w * 0.5f, c.y + cover_h * 0.5f);
+
+      auto& game = m_displayed_games[index];
+      AbstractTexture* handle = GetHandleForGame(game);
+      if (handle)
+      {
+        dl->AddImageRounded((ImTextureID)handle, ca, cb, ImVec2(0, 0), ImVec2(1, 1),
+                            IM_COL32_WHITE, 6.0f * s);
+      }
+      else
+      {
+        dl->AddRectFilled(ca, cb, GridInk(200), 6.0f * s);
+        const std::string name = game->GetName(m_title_database);
+        dl->PushClipRect(ca, cb, true);
+        GridTextCentered(dl, c, IM_COL32_WHITE, name.c_str(), 0.6f);
+        dl->PopClipRect();
+      }
+
+      if (selected)
+        dl->AddRect(a, b, GridAccent(), rounding, 0, 5.0f * s);
+    }
+  }
+
+  // more rows above / below
+  if (first_row > 0)
+    GridTextCentered(dl, ImVec2(size.x * 0.5f, top - 30.0f * s), GridInk(160), "^", 1.0f);
+  if (first_row + visible_rows < rows)
+    GridTextCentered(dl, ImVec2(size.x * 0.5f, size.y - bottom + 10.0f * s), GridInk(160), "v", 1.0f);
+
+  return FrontendResult();
 }
 
 FrontendResult ImGuiFrontend::CreateListPage()

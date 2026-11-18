@@ -194,6 +194,13 @@ private:
   void UpdateCarouselAnimation(float delta_time);
   void DrawCarouselItem(std::shared_ptr<UICommon::GameFile> game, int index, int center_index, float base_x, float base_y);
   void DrawGameInfo(std::shared_ptr<UICommon::GameFile> game);
+
+  // Box-art grid home screen (the default layout; the carousel is still in Settings > Interface)
+  FrontendResult CreateGridPage();
+  void DrawGridBackground();
+  void DrawGridChrome();
+  void MoveGridSelection(int delta);
+  int m_grid_columns = 5;
   void DrawCarouselBackground();
   float GetCarouselItemPosition(int index, int center_index);
   float GetCarouselItemScale(int index, int center_index);
