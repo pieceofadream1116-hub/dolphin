@@ -201,6 +201,18 @@ private:
   void DrawGridChrome();
   void MoveGridSelection(int delta);
   int m_grid_columns = 5;
+  // what the grid's controller focus is on: the game tiles, or a round side button
+  enum class GridFocus
+  {
+    Tiles,
+    Left,
+    Right
+  };
+  GridFocus m_grid_focus = GridFocus::Tiles;
+  int m_grid_side = 0;     // which side button (0 = top)
+  bool m_grid_a_held = false;
+  bool GridHorizontal(int direction);
+  void GridActivateSide();
   void DrawCarouselBackground();
   float GetCarouselItemPosition(int index, int center_index);
   float GetCarouselItemScale(int index, int center_index);

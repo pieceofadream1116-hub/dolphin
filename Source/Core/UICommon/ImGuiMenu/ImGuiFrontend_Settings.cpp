@@ -234,7 +234,7 @@ void CreateInterfaceTab(UIState* state)
     const char* theme_names[] = {
       "Dark Theme", "Light Theme", "Classic Theme", "Ocean Blue", "Purple Night",
       "Forest Green", "Cherry Red", "Amber Gold", "Steel Blue", "Sunset Orange",
-      "Cyber Pink", "Mint Fresh"
+      "Cyber Pink", "Mint Fresh", "Bright Lavender"
     };
 
     if (ImGui::Combo("Color Theme", &current_theme, theme_names, IM_ARRAYSIZE(theme_names)))
