@@ -83,19 +83,32 @@ HID::HidDevice OpenDevice(const winrt::hstring& id)
         winrt::Windows::ApplicationModel::Core::CoreApplication::MainView().Dispatcher();
     if (dispatcher && !dispatcher.HasThreadAccess())
     {
+      // Shared, because the UI thread may run this after we've stopped waiting.
+      struct Pending
+      {
+        std::mutex mutex;
+        winrt::Windows::Foundation::IAsyncOperation<HID::HidDevice> op{nullptr};
+      };
+      const auto pending = std::make_shared<Pending>();
+
       auto queued = dispatcher.RunAsync(winrt::Windows::UI::Core::CoreDispatcherPriority::Normal,
-                                        [&op, id] {
+                                        [pending, id] {
                                           try
                                           {
-                                            op = HID::HidDevice::FromIdAsync(
+                                            auto started = HID::HidDevice::FromIdAsync(
                                                 id, FileAccessMode::ReadWrite);
+                                            std::lock_guard lk(pending->mutex);
+                                            pending->op = std::move(started);
                                           }
                                           catch (...)
                                           {
                                           }
                                         });
-      if (queued.wait_for(OPEN_TIMEOUT) != AsyncStatus::Completed)
-        op = nullptr;
+      if (queued.wait_for(OPEN_TIMEOUT) == AsyncStatus::Completed)
+      {
+        std::lock_guard lk(pending->mutex);
+        op = pending->op;
+      }
     }
   }
   catch (...)
