@@ -65,4 +65,8 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: appx-${{ matrix.configuration }}
-        path: AppPackages
+        path: |
+          Source/AppPackages/**/*.msixbundle
+          Source/AppPackages/**/Dependencies/x64/*.appx
+          Source/AppPackages/**/*.cer
+        if-no-files-found: error
