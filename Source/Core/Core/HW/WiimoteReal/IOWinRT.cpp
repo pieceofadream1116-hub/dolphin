@@ -5,6 +5,9 @@
 
 #ifdef WINRT_XBOX
 
+// C++/WinRT's delegate wrappers for lambdas trip C4265 (warnings are errors here).
+#pragma warning(disable : 4265)
+
 #include <algorithm>
 #include <chrono>
 #include <cstring>
