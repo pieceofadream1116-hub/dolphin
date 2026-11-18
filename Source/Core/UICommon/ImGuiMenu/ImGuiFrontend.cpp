@@ -5,6 +5,7 @@
 
 // Standard library
 #include <atomic>
+#include <deque>
 #include <cctype>
 #include <cstring>
 #include <memory>
@@ -2825,13 +2826,144 @@ std::pair<int, int> ImGuiFrontend::GetAchievementCountsForGame(const std::string
 }
 #endif  // USE_RETRO_ACHIEVEMENTS
 
+
+//============================================================
+// Faster loading
+//
+// The game list is kept in Dolphin's game list cache (as the desktop
+// version does), so starting Dolphin or opening Settings doesn't reopen
+// every game file. Missing box art is downloaded on a background thread
+// instead of freezing the screen; the tile shows the placeholder until
+// the cover arrives.
+//============================================================
+
+namespace
+{
+std::mutex s_game_cache_mutex;
+UICommon::GameFileCache s_game_cache;
+bool s_game_cache_loaded = false;
+
+std::vector<std::shared_ptr<UICommon::GameFile>>
+ScanGamesCached(const std::vector<std::string>& game_paths, std::atomic<size_t>* progress)
+{
+  std::vector<std::shared_ptr<UICommon::GameFile>> games;
+  games.reserve(game_paths.size());
+
+  std::lock_guard lk(s_game_cache_mutex);
+  if (!s_game_cache_loaded)
+  {
+    s_game_cache.Load();
+    s_game_cache_loaded = true;
+  }
+
+  bool changed = false;
+  for (const auto& path : game_paths)
+  {
+    bool this_changed = false;
+    std::shared_ptr<const UICommon::GameFile> game = s_game_cache.AddOrGet(path, &this_changed);
+    changed |= this_changed;
+    if (game && game->IsValid())
+      games.emplace_back(std::const_pointer_cast<UICommon::GameFile>(game));
+    if (progress)
+      (*progress)++;
+  }
+
+  if (changed)
+    s_game_cache.Save();
+  return games;
+}
+
+std::mutex s_cover_mutex;
+std::deque<std::shared_ptr<UICommon::GameFile>> s_cover_queue;
+std::unordered_set<std::string> s_cover_requested;  // asked for (downloading or done)
+std::vector<std::string> s_cover_finished;          // done since the last frame
+bool s_cover_worker_running = false;
+
+std::string CoverPath(const UICommon::GameFile& game)
+{
+  return File::GetUserPath(D_COVERCACHE_IDX) + game.GetGameTDBID() + ".png";
+}
+
+void RequestCoverDownload(std::shared_ptr<UICommon::GameFile> game)
+{
+  std::lock_guard lk(s_cover_mutex);
+  if (!s_cover_requested.insert(game->GetGameID()).second)
+    return;
+  s_cover_queue.push_back(std::move(game));
+  if (s_cover_worker_running)
+    return;
+
+  s_cover_worker_running = true;
+  std::thread([] {
+    for (;;)
+    {
+      std::shared_ptr<UICommon::GameFile> next;
+      {
+        std::lock_guard qlk(s_cover_mutex);
+        if (s_cover_queue.empty())
+        {
+          s_cover_worker_running = false;
+          return;
+        }
+        next = std::move(s_cover_queue.front());
+        s_cover_queue.pop_front();
+      }
+
+      try
+      {
+        next->DownloadDefaultCover();
+      }
+      catch (...)
+      {
+      }
+
+      std::lock_guard qlk(s_cover_mutex);
+      s_cover_finished.push_back(next->GetGameID());
+    }
+  }).detach();
+}
+}  // namespace
+
 AbstractTexture* ImGuiFrontend::GetHandleForGame(std::shared_ptr<UICommon::GameFile> game)
 {
+  // covers that finished downloading: drop their placeholder so they load now
+  {
+    std::lock_guard lk(s_cover_mutex);
+    for (const std::string& id : s_cover_finished)
+      m_cover_textures.erase(id);
+    s_cover_finished.clear();
+  }
+
   std::string game_id = game->GetGameID();
   auto result = m_cover_textures.find(game_id);
   if (m_cover_textures.find(game_id) == m_cover_textures.end())
   {
-    std::shared_ptr<AbstractTexture> texture = CreateCoverTexture(game);
+    if (!File::Exists(CoverPath(*game)))
+    {
+      bool requested;
+      {
+        std::lock_guard lk(s_cover_mutex);
+        requested = s_cover_requested.count(game_id) != 0;
+      }
+      if (!requested)
+      {
+        // fetch it in the background; show the placeholder until it's here
+        RequestCoverDownload(game);
+        return GetOrCreateMissingTex();
+      }
+      bool still_pending;
+      {
+        std::lock_guard lk(s_cover_mutex);
+        still_pending = std::find_if(s_cover_queue.begin(), s_cover_queue.end(),
+                                     [&game_id](const auto& g) { return g->GetGameID() == game_id; }) !=
+                        s_cover_queue.end();
+      }
+      if (still_pending)
+        return GetOrCreateMissingTex();
+    }
+
+    std::shared_ptr<AbstractTexture> texture =
+        File::Exists(CoverPath(*game)) ? CreateTextureFromPath(CoverPath(*game)) : nullptr;
     if (texture == nullptr)
     {
       AbstractTexture* missing = GetOrCreateMissingTex();
@@ -2923,14 +3055,8 @@ void ImGuiFrontend::LoadGameList()
   all_game_paths.insert(all_game_paths.end(), local_game_paths.begin(), local_game_paths.end());
 #endif
   
-  for (const auto& game_path : all_game_paths)
-  {
-    auto game = std::make_shared<UICommon::GameFile>(game_path);
-    if (game && game->IsValid())
-      m_games.emplace_back(std::move(game));
-    m_loading_current++;
-  }
-  
+  m_games = ScanGamesCached(all_game_paths, &m_loading_current);
+
   FilterGamesForCategory();
   if (m_selectedGameIdx >= m_displayed_games.size() || m_selectedGameIdx < 0)
     m_selectedGameIdx = 0;
@@ -2963,15 +3089,8 @@ void ImGuiFrontend::BeginLoadGameListAsync()
     m_loading_total = all_game_paths.size();
 
     // Build game objects in a temporary vector
-    std::vector<std::shared_ptr<UICommon::GameFile>> temp_games;
-    temp_games.reserve(all_game_paths.size());
-    for (const auto& game_path : all_game_paths)
-    {
-      auto game = std::make_shared<UICommon::GameFile>(game_path);
-      if (game && game->IsValid())
-        temp_games.emplace_back(std::move(game));
-      m_loading_current++;
-    }
+    std::vector<std::shared_ptr<UICommon::GameFile>> temp_games =
+        ScanGamesCached(all_game_paths, &m_loading_current);
 
     // Commit results on the main data structures under lock
     {
