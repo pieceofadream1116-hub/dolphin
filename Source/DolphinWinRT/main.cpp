@@ -3,6 +3,7 @@
 #include "UWPUtils.h"
 
 #include <windows.h>
+#include <atomic>
 #include <iostream>
 
 #include <winrt/Windows.ApplicationModel.Activation.h>
@@ -28,6 +29,7 @@
 #include "VideoCommon/OnScreenDisplay.h"
 #include "VideoCommon/Present.h"
 
+#include "Common/Config/Config.h"
 #include "Common/WindowSystemInfo.h"
 
 #include "Core/Boot/Boot.h"
@@ -67,6 +69,47 @@ Common::Flag g_shutdown_requested{false};
 Common::Flag g_tried_graceful_shutdown{false};
 Common::Flag g_needs_frontend_reset{false};
 
+// Settings are saved as soon as they change. On the Xbox the app is usually closed with the
+// Xbox button and Quit, which ends it straight away, so anything left to "save on exit" was lost
+// (game folders, options, controller choices).
+std::atomic<bool> g_settings_save_pending{false};
+std::atomic<bool> g_saving_settings{false};
+
+void SaveAllSettings()
+{
+  g_saving_settings = true;
+  try
+  {
+    Config::Save();
+  }
+  catch (...)
+  {
+  }
+  g_saving_settings = false;
+}
+
+// Called whenever any setting changes (on any thread): save once, soon, on the UI thread.
+void QueueSettingsSave()
+{
+  if (g_saving_settings)
+    return;
+  bool expected = false;
+  if (!g_settings_save_pending.compare_exchange_strong(expected, true))
+    return;
+  try
+  {
+    CoreApplication::MainView().Dispatcher().RunAsync(
+        winrt::Windows::UI::Core::CoreDispatcherPriority::Low, [] {
+          g_settings_save_pending = false;
+          SaveAllSettings();
+        });
+  }
+  catch (...)
+  {
+    g_settings_save_pending = false;
+  }
+}
+
 struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 {
   IFrameworkView CreateView() { return *this; }
@@ -76,6 +119,8 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
     v.Activated({this, &App::OnActivate});
     CoreApplication::EnteredBackground({this, &App::EnteredBackground});
     CoreApplication::Suspending({this, &App::Suspending});
+
+    Config::AddConfigChangedCallback(QueueSettingsSave);
   }
 
   void Load(hstring const&) {}
@@ -110,7 +155,8 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
         g_shutdown_requested.Clear();
         g_tried_graceful_shutdown.Clear();
 
-        // Reinitialize UI systems
+        // Reinitialize UI systems (keep any changes made in-game first)
+        SaveAllSettings();
         UICommon::Shutdown();
         UICommon::Init();
         UICommon::InitControllers({});
@@ -368,6 +414,8 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
   void EnteredBackground(const IInspectable&,
                          const winrt::Windows::ApplicationModel::EnteredBackgroundEventArgs& args)
   {
+    // The Xbox button was pressed; the next step may be Quit, so save now.
+    SaveAllSettings();
   }
 
   void Suspending(const IInspectable&,
@@ -376,8 +424,10 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
     auto& system = Core::System::GetInstance();
 
     // The Series S/X quits fast, so let's immediately shutdown to ensure all the caches save.
+    SaveAllSettings();
     Core::Stop(system);
     Core::Shutdown(system);
+    SaveAllSettings();
     UICommon::Shutdown();
 
     if (!m_launchOnExit.empty())

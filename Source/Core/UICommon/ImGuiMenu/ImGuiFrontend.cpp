@@ -2362,6 +2362,7 @@ void ImGuiFrontend::AddGameFolder(std::string path)
 {
   m_paths.push_back(path);
   Config::SetIsoPaths(m_paths);
+  Config::Save();
 }
 
 bool ImGuiFrontend::TryInput(std::string expression, std::shared_ptr<ciface::Core::Device> device)
