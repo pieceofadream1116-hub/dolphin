@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 // Standard Library
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <future>
@@ -40,6 +41,7 @@
 #include "Core/HW/Wiimote.h"
 #include "Core/HW/WiimoteEmu/Extension/Extension.h"
 #include "Core/HW/WiimoteReal/WiimoteReal.h"
+#include "Core/HW/WiimoteReal/IOWinRT.h"
 #include "Core/PowerPC/PowerPC.h"
 #include "Core/TitleDatabase.h"
 #include "Core/WiiUtils.h"
@@ -1195,16 +1197,25 @@ void CreateGCPort(int index, std::vector<std::string> devices)
 
 void CreateWiiPort(int index, std::vector<std::string> devices)
 {
-  if (ImGui::BeginChild(fmt::format("gc-wii-{}", index).c_str(), ImVec2(-1, 75 * m_frame_scale),
-                        true))
+  const bool is_real =
+      Config::Get(Config::GetInfoForWiimoteSource(index)) == WiimoteSource::Real;
+  const std::string bar_status = is_real ? WiimoteReal::GetWinRTWiimoteStatus() : std::string();
+  const int status_lines =
+      bar_status.empty() ? 0 : 1 + static_cast<int>(std::count(bar_status.begin(), bar_status.end(), '\n'));
+  const float child_h = 75 * m_frame_scale + status_lines * ImGui::GetTextLineHeightWithSpacing();
+  if (ImGui::BeginChild(fmt::format("gc-wii-{}", index).c_str(), ImVec2(-1, child_h), true))
   {
     auto controller = Wiimote::GetConfig()->GetController(index);
     auto default_device = controller->GetDefaultDevice().name;
 
     ImGui::Text("Wiimote Port %d", index + 1);
-
-    const bool is_real =
-        Config::Get(Config::GetInfoForWiimoteSource(index)) == WiimoteSource::Real;
+    if (!bar_status.empty())
+    {
+      // what the DolphinBar search sees right now
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.82f, 0.35f, 1.0f));
+      ImGui::TextUnformatted(bar_status.c_str());
+      ImGui::PopStyleColor();
+    }
     if (is_real && m_selected_wiimote_profile[index].empty())
       m_selected_wiimote_profile[index] = "Real Wii Remote (DolphinBar)";
 

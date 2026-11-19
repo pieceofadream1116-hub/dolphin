@@ -19,11 +19,14 @@
 #include <winrt/Windows.ApplicationModel.Core.h>
 #include <winrt/Windows.Devices.Enumeration.h>
 #include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Gaming.Input.h>
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/Windows.UI.Core.h>
 
 #include "Common/Logging/Log.h"
 #include "Common/StringUtil.h"
+
+#include <fmt/format.h>
 #include "Core/HW/WiimoteCommon/WiimoteConstants.h"
 #include "Core/HW/WiimoteCommon/WiimoteHid.h"
 
@@ -50,6 +53,18 @@ constexpr auto PROBE_TIMEOUT = std::chrono::milliseconds(600);
 
 // An empty DolphinBar slot is still a HID device. Don't reopen it on every scan.
 constexpr auto EMPTY_SLOT_RETRY = std::chrono::seconds(3);
+
+// What the scanner saw last time, shown under Wiimote Port 1 so we can tell why a remote
+// isn't connecting (no DolphinBar seen, the Xbox refused access, or no remote in a slot).
+std::mutex s_status_mutex;
+std::string s_status = "Dolphin Bar: not searched yet. Pick \"Real Wii Remote (DolphinBar)\".";
+std::string s_open_error;
+
+void SetStatus(std::string text)
+{
+  std::lock_guard lk(s_status_mutex);
+  s_status = std::move(text);
+}
 
 // The scanner and Wii Remote threads are plain std::threads; WinRT calls need an apartment.
 void EnsureApartment()
@@ -127,17 +142,23 @@ HID::HidDevice OpenDevice(const winrt::hstring& id)
     if (op.wait_for(OPEN_TIMEOUT) != AsyncStatus::Completed)
     {
       op.Cancel();
+      s_open_error = "timed out";
       return nullptr;
     }
-    return op.GetResults();
+    HID::HidDevice device = op.GetResults();
+    if (!device)
+      s_open_error = "Xbox refused access";
+    return device;
   }
   catch (const winrt::hresult_error& e)
   {
+    s_open_error = fmt::format("error {:08X}", static_cast<u32>(e.code()));
     WARN_LOG_FMT(WIIMOTE, "WinRT HID: couldn't open {}: {:08x} {}", WStringToUTF8(id.c_str()),
                  static_cast<u32>(e.code()), WStringToUTF8(e.message().c_str()));
   }
   catch (...)
   {
+    s_open_error = "unknown error";
   }
   return nullptr;
 }
@@ -251,59 +272,146 @@ void WiimoteScannerWinRT::FindWiimotes(std::vector<Wiimote*>& found_wiimotes, Wi
   EnsureApartment();
 
   const auto now = std::chrono::steady_clock::now();
+  static int s_scans = 0;
+  ++s_scans;
 
-  for (const u16 pid : {WIIMOTE_PID, WIIMOTE_PLUS_PID})
+  int slots = 0, opened = 0, answered = 0, waiting = 0, connected = 0;
+  std::string usages, problems;
+
+  // Every Nintendo HID interface the Xbox shows us (whatever its product or usage).
+  auto props = winrt::single_threaded_vector<winrt::hstring>(std::vector<winrt::hstring>{
+      L"System.DeviceInterface.Hid.ProductId", L"System.DeviceInterface.Hid.UsagePage",
+      L"System.DeviceInterface.Hid.UsageId"});
+  winrt::Windows::Foundation::Collections::IVectorView<DeviceInformation> devices{nullptr};
+  try
   {
-    winrt::Windows::Foundation::Collections::IVectorView<DeviceInformation> devices{nullptr};
-    try
+    const std::wstring selector =
+        L"System.Devices.InterfaceClassGuid:=\"{4D1E55B2-F16F-11CF-88CB-001111000030}\""
+        L" AND System.Devices.InterfaceEnabled:=System.StructuredQueryType.Boolean#True"
+        L" AND System.DeviceInterface.Hid.VendorId:=" +
+        std::to_wstring(NINTENDO_VID);
+    auto op = DeviceInformation::FindAllAsync(winrt::hstring(selector), props);
+    if (op.wait_for(OPEN_TIMEOUT) != AsyncStatus::Completed)
     {
-      auto op = DeviceInformation::FindAllAsync(winrt::hstring(WiimoteSelector(pid)));
-      if (op.wait_for(OPEN_TIMEOUT) != AsyncStatus::Completed)
-      {
-        op.Cancel();
-        continue;
-      }
-      devices = op.GetResults();
+      op.Cancel();
+      SetStatus(fmt::format("Dolphin Bar: search {} timed out.", s_scans));
+      return;
     }
-    catch (const winrt::hresult_error& e)
+    devices = op.GetResults();
+  }
+  catch (const winrt::hresult_error& e)
+  {
+    SetStatus(fmt::format("Dolphin Bar: device search failed (error {:08X}).",
+                          static_cast<u32>(e.code())));
+    return;
+  }
+
+  for (const DeviceInformation& info : devices)
+  {
+    auto prop = [&info](const wchar_t* name) -> u16 {
+      try
+      {
+        auto v = info.Properties().TryLookup(name);
+        return v ? winrt::unbox_value_or<u16>(v, 0) : 0;
+      }
+      catch (...)
+      {
+        return 0;
+      }
+    };
+    const u16 pid = prop(L"System.DeviceInterface.Hid.ProductId");
+    const u16 page = prop(L"System.DeviceInterface.Hid.UsagePage");
+    const u16 usage = prop(L"System.DeviceInterface.Hid.UsageId");
+    if (pid != WIIMOTE_PID && pid != WIIMOTE_PLUS_PID)
+      continue;
+
+    ++slots;
+    const std::string u = fmt::format("{:04X}:{:04X}", page, usage);
+    if (usages.find(u) == std::string::npos)
+      usages += (usages.empty() ? "" : ", ") + u;
+
+    const winrt::hstring hid = info.Id();
+    const std::string id = WStringToUTF8(hid.c_str());
+
+    if (!IsNewWiimote(id))
     {
-      WARN_LOG_FMT(WIIMOTE, "WinRT HID: device search failed: {:08x}", static_cast<u32>(e.code()));
+      ++connected;
       continue;
     }
 
-    for (const DeviceInformation& info : devices)
+    const auto empty = s_empty_slots.find(id);
+    if (empty != s_empty_slots.end() && now < empty->second)
     {
-      const winrt::hstring hid = info.Id();
-      const std::string id = WStringToUTF8(hid.c_str());
+      ++waiting;
+      continue;
+    }
 
-      if (!IsNewWiimote(id))
-        continue;
+    s_open_error.clear();
+    HID::HidDevice device = OpenDevice(hid);
+    if (!device)
+    {
+      if (problems.find(s_open_error) == std::string::npos)
+        problems += (problems.empty() ? "" : ", ") + s_open_error;
+      s_empty_slots[id] = now + EMPTY_SLOT_RETRY;
+      continue;
+    }
+    ++opened;
 
-      const auto empty = s_empty_slots.find(id);
-      if (empty != s_empty_slots.end() && now < empty->second)
-        continue;
+    if (!ProbeWiimote(device))
+    {
+      // An empty DolphinBar slot (or a remote that isn't awake yet).
+      device.Close();
+      s_empty_slots[id] = now + EMPTY_SLOT_RETRY;
+      continue;
+    }
+    ++answered;
 
-      HID::HidDevice device = OpenDevice(hid);
-      if (!device)
+    s_empty_slots.erase(id);
+    NOTICE_LOG_FMT(WIIMOTE, "WinRT HID: found Wii Remote {:04x}:{:04x} at {}", NINTENDO_VID, pid,
+                   id);
+    found_wiimotes.push_back(new WiimoteWinRT(id, std::move(device)));
+  }
+
+  std::string text;
+  if (slots == 0)
+  {
+    text = fmt::format("Dolphin Bar: not seen (search {}). Is it plugged in and on mode 4?", s_scans);
+    // Does the Xbox show it as a game controller instead?
+    try
+    {
+      for (const auto& pad : winrt::Windows::Gaming::Input::RawGameController::RawGameControllers())
       {
-        s_empty_slots[id] = now + EMPTY_SLOT_RETRY;
-        continue;
+        if (pad.HardwareVendorId() == NINTENDO_VID)
+          text += fmt::format("\nXbox lists it as a game controller ({:04X}:{:04X}).",
+                              pad.HardwareVendorId(), pad.HardwareProductId());
       }
-
-      if (!ProbeWiimote(device))
-      {
-        // An empty DolphinBar slot (or a remote that isn't awake yet).
-        device.Close();
-        s_empty_slots[id] = now + EMPTY_SLOT_RETRY;
-        continue;
-      }
-
-      s_empty_slots.erase(id);
-      NOTICE_LOG_FMT(WIIMOTE, "WinRT HID: found Wii Remote {:04x}:{:04x} at {}", NINTENDO_VID, pid,
-                     id);
-      found_wiimotes.push_back(new WiimoteWinRT(id, std::move(device)));
+    }
+    catch (...)
+    {
     }
   }
+  else
+  {
+    text = fmt::format("Dolphin Bar: {} slot(s) seen [{}], search {}.", slots, usages, s_scans);
+    if (connected)
+      text += fmt::format("\nWii Remote connected: {}.", connected);
+    if (answered)
+      text += fmt::format("\nFound {} Wii Remote(s) just now.", answered);
+    if (!problems.empty())
+      text += "\nCan't open a slot: " + problems + ".";
+    else if (opened && !answered && !connected)
+      text += fmt::format("\nOpened {} slot(s), no Wii Remote answered. Press 1+2 on the remote.",
+                          opened);
+    else if (waiting && !connected)
+      text += "\nWaiting to try the slots again...";
+  }
+  SetStatus(std::move(text));
+}
+
+std::string GetWinRTWiimoteStatus()
+{
+  std::lock_guard lk(s_status_mutex);
+  return s_status;
 }
 
 WiimoteWinRT::WiimoteWinRT(std::string device_id, HID::HidDevice device)

@@ -35,7 +35,10 @@
 #include "Core/Boot/Boot.h"
 #include "Core/BootManager.h"
 #include "Core/Core.h"
+#include "Core/Config/WiimoteSettings.h"
 #include "Core/HW/ProcessorInterface.h"
+#include "Core/HW/Wiimote.h"
+#include "Core/HW/WiimoteReal/WiimoteReal.h"
 #include "Core/Host.h"
 #include "Core/HotkeyManager.h"
 #include "Core/IOS/STM/STM.h"
@@ -74,9 +77,15 @@ Common::Flag g_needs_frontend_reset{false};
 // (game folders, options, controller choices).
 std::atomic<bool> g_settings_save_pending{false};
 std::atomic<bool> g_saving_settings{false};
+// Set when Suspending unloaded the settings; Resuming loads them again. Without this, coming back
+// to Dolphin after the Xbox suspended it left no settings loaded: the game folders vanished and
+// nothing new (like a folder you just added) could be saved.
+std::atomic<bool> g_settings_unloaded{false};
 
 void SaveAllSettings()
 {
+  if (g_settings_unloaded)
+    return;
   g_saving_settings = true;
   try
   {
@@ -110,6 +119,20 @@ void QueueSettingsSave()
   }
 }
 
+// If a Wii Remote port is set to a real Wii Remote (DolphinBar), start looking for it straight
+// away, so the remote is ready (and its status shows in Settings) before a game starts.
+void StartRealWiimotesIfWanted()
+{
+  for (int i = 0; i < MAX_WIIMOTES; ++i)
+  {
+    if (Config::Get(Config::GetInfoForWiimoteSource(i)) == WiimoteSource::Real)
+    {
+      WiimoteReal::Initialize(::Wiimote::InitializeMode::DO_NOT_WAIT_FOR_WIIMOTES);
+      return;
+    }
+  }
+}
+
 struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 {
   IFrameworkView CreateView() { return *this; }
@@ -119,6 +142,7 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
     v.Activated({this, &App::OnActivate});
     CoreApplication::EnteredBackground({this, &App::EnteredBackground});
     CoreApplication::Suspending({this, &App::Suspending});
+    CoreApplication::Resuming({this, &App::Resuming});
 
     Config::AddConfigChangedCallback(QueueSettingsSave);
   }
@@ -160,6 +184,7 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
         UICommon::Shutdown();
         UICommon::Init();
         UICommon::InitControllers({});
+        StartRealWiimotesIfWanted();
 
         // Create and run new frontend
         auto frontend = new ImGuiFrontend::ImGuiFrontend();
@@ -411,6 +436,19 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
     window.Activate();
   }
 
+  void Resuming(const IInspectable&, const IInspectable&)
+  {
+    if (!g_settings_unloaded.exchange(false))
+      return;
+    UICommon::SetUserDirectory(UWP::GetUserLocation());
+    UICommon::CreateDirectories();
+    UICommon::Init();
+    UICommon::InitControllers({});
+    StartRealWiimotesIfWanted();
+    // show the home screen again, with the game list read from the reloaded settings
+    g_needs_frontend_reset.Set();
+  }
+
   void EnteredBackground(const IInspectable&,
                          const winrt::Windows::ApplicationModel::EnteredBackgroundEventArgs& args)
   {
@@ -429,6 +467,7 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
     Core::Shutdown(system);
     SaveAllSettings();
     UICommon::Shutdown();
+    g_settings_unloaded = true;
 
     if (!m_launchOnExit.empty())
     {

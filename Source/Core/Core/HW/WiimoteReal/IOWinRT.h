@@ -68,6 +68,9 @@ public:
   void Update() override {}
   void RequestStopSearching() override {}
 };
+
+// One or more lines saying what the DolphinBar search saw last (shown in the Wii settings).
+std::string GetWinRTWiimoteStatus();
 }  // namespace WiimoteReal
 
 #else
@@ -75,5 +78,6 @@ public:
 namespace WiimoteReal
 {
 using WiimoteScannerWinRT = WiimoteScannerDummy;
+inline std::string GetWinRTWiimoteStatus() { return {}; }
 }
 #endif

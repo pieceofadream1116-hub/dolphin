@@ -9,7 +9,7 @@
 	<Identity
     Name="3143e227-cbe5-41c4-aaa9-cf40132a1b22"
     Publisher="CN=SternXD"
-    Version="1.1.9.2" />
+    Version="1.1.10.0" />
   <mp:PhoneIdentity PhoneProductId="3143e227-cbe5-41c4-aaa9-cf40132a1b22" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
 	<Properties>
@@ -92,9 +92,13 @@
     <DeviceCapability Name="humaninterfacedevice">
       <Device Id="vidpid:057E 0306">
         <Function Type="usage:0001 0005"/>
+        <Function Type="usage:0001 0004"/>
+        <Function Type="usage:FF00 *"/>
       </Device>
       <Device Id="vidpid:057E 0330">
         <Function Type="usage:0001 0005"/>
+        <Function Type="usage:0001 0004"/>
+        <Function Type="usage:FF00 *"/>
       </Device>
     </DeviceCapability>
   </Capabilities>
