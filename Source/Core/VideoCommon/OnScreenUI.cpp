@@ -81,9 +81,14 @@ bool OnScreenUI::Initialize(u32 width, u32 height, float scale)
   // Font texture(s).
   {
     ImGuiIO& io = ImGui::GetIO();
+    // thick bold writing (DejaVu Sans Bold), drawn at 3x detail so it stays sharp when scaled up
+    ImFontConfig bold;
+    bold.RasterizerDensity = 3.0f;
     ImFontConfig config;
     config.MergeMode = true;
-    io.Fonts->AddFontFromFileTTF("Sys/Resources/Roboto-Regular.ttf", 13, 0);
+    config.RasterizerDensity = 3.0f;
+    if (!io.Fonts->AddFontFromFileTTF("Sys/Resources/DejaVuSans-Bold.ttf", 13, &bold))
+      io.Fonts->AddFontFromFileTTF("Sys/Resources/Roboto-Regular.ttf", 13, 0);
     io.Fonts->AddFontFromFileTTF("Sys/Resources/NotoSansJP-Regular.ttf", 13, &config,
                                  io.Fonts->GetGlyphRangesJapanese());
 

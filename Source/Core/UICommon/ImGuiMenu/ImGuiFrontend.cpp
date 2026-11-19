@@ -771,54 +771,54 @@ void ApplyColorTheme(int theme_index)
       s.Colors[ImGuiCol_HeaderActive] = ImVec4(0.35f, 0.58f, 0.48f, 1.00f);
       s.Colors[ImGuiCol_Text] = ImVec4(0.85f, 0.95f, 0.90f, 1.00f);
       break;
-    case 12: // Lavender: deep lavender windows with big white writing, matches the box-art grid
+    case 12: // Burgundy: dark burgundy windows with big, bold white writing and gold highlights
     {
       ImGui::StyleColorsDark();
       auto c = [&s](ImGuiCol idx, float r, float g, float b, float a = 1.0f) {
         s.Colors[idx] = ImVec4(r, g, b, a);
       };
       c(ImGuiCol_Text, 1.00f, 1.00f, 1.00f);
-      c(ImGuiCol_TextDisabled, 0.80f, 0.78f, 0.92f);
-      c(ImGuiCol_WindowBg, 0.20f, 0.17f, 0.38f, 0.96f);
-      c(ImGuiCol_ChildBg, 0.24f, 0.21f, 0.44f, 0.60f);
-      c(ImGuiCol_PopupBg, 0.22f, 0.19f, 0.42f, 0.99f);
-      c(ImGuiCol_Border, 0.62f, 0.56f, 0.95f, 0.45f);
+      c(ImGuiCol_TextDisabled, 0.88f, 0.80f, 0.82f);
+      c(ImGuiCol_WindowBg, 0.24f, 0.03f, 0.09f, 0.97f);
+      c(ImGuiCol_ChildBg, 0.30f, 0.05f, 0.12f, 0.60f);
+      c(ImGuiCol_PopupBg, 0.22f, 0.03f, 0.08f, 0.99f);
+      c(ImGuiCol_Border, 1.00f, 0.78f, 0.25f, 0.55f);
       c(ImGuiCol_BorderShadow, 0.00f, 0.00f, 0.00f, 0.00f);
-      c(ImGuiCol_FrameBg, 0.31f, 0.27f, 0.56f);
-      c(ImGuiCol_FrameBgHovered, 0.40f, 0.35f, 0.68f);
-      c(ImGuiCol_FrameBgActive, 0.48f, 0.42f, 0.78f);
-      c(ImGuiCol_TitleBg, 0.26f, 0.22f, 0.50f);
-      c(ImGuiCol_TitleBgActive, 0.34f, 0.29f, 0.62f);
-      c(ImGuiCol_TitleBgCollapsed, 0.26f, 0.22f, 0.50f, 0.80f);
-      c(ImGuiCol_MenuBarBg, 0.24f, 0.21f, 0.46f);
-      c(ImGuiCol_ScrollbarBg, 0.16f, 0.14f, 0.32f, 0.60f);
-      c(ImGuiCol_ScrollbarGrab, 0.52f, 0.46f, 0.88f, 0.85f);
-      c(ImGuiCol_ScrollbarGrabHovered, 0.62f, 0.56f, 0.96f);
-      c(ImGuiCol_ScrollbarGrabActive, 0.93f, 0.40f, 0.58f);
-      c(ImGuiCol_CheckMark, 1.00f, 0.55f, 0.70f);
-      c(ImGuiCol_SliderGrab, 0.72f, 0.66f, 1.00f);
-      c(ImGuiCol_SliderGrabActive, 1.00f, 0.55f, 0.70f);
-      c(ImGuiCol_Button, 0.40f, 0.34f, 0.72f);
-      c(ImGuiCol_ButtonHovered, 0.90f, 0.38f, 0.58f);
-      c(ImGuiCol_ButtonActive, 0.80f, 0.28f, 0.48f);
-      c(ImGuiCol_Header, 0.40f, 0.34f, 0.72f);
-      c(ImGuiCol_HeaderHovered, 0.90f, 0.38f, 0.58f);
-      c(ImGuiCol_HeaderActive, 0.80f, 0.28f, 0.48f);
-      c(ImGuiCol_Separator, 0.55f, 0.50f, 0.90f, 0.60f);
-      c(ImGuiCol_SeparatorHovered, 0.90f, 0.38f, 0.58f);
-      c(ImGuiCol_SeparatorActive, 0.80f, 0.28f, 0.48f);
-      c(ImGuiCol_ResizeGrip, 0.52f, 0.46f, 0.88f, 0.40f);
-      c(ImGuiCol_ResizeGripHovered, 0.90f, 0.38f, 0.58f, 0.70f);
-      c(ImGuiCol_ResizeGripActive, 0.80f, 0.28f, 0.48f, 0.90f);
-      c(ImGuiCol_Tab, 0.30f, 0.26f, 0.56f);
-      c(ImGuiCol_TabHovered, 0.90f, 0.38f, 0.58f);
-      c(ImGuiCol_TabSelected, 0.48f, 0.41f, 0.82f);
-      c(ImGuiCol_TabSelectedOverline, 1.00f, 0.55f, 0.70f);
-      c(ImGuiCol_TableHeaderBg, 0.30f, 0.26f, 0.56f);
+      c(ImGuiCol_FrameBg, 0.38f, 0.06f, 0.15f);
+      c(ImGuiCol_FrameBgHovered, 0.55f, 0.09f, 0.21f);
+      c(ImGuiCol_FrameBgActive, 0.66f, 0.12f, 0.26f);
+      c(ImGuiCol_TitleBg, 0.30f, 0.04f, 0.11f);
+      c(ImGuiCol_TitleBgActive, 0.42f, 0.06f, 0.16f);
+      c(ImGuiCol_TitleBgCollapsed, 0.30f, 0.04f, 0.11f, 0.80f);
+      c(ImGuiCol_MenuBarBg, 0.30f, 0.04f, 0.11f);
+      c(ImGuiCol_ScrollbarBg, 0.16f, 0.02f, 0.06f, 0.60f);
+      c(ImGuiCol_ScrollbarGrab, 0.62f, 0.14f, 0.28f);
+      c(ImGuiCol_ScrollbarGrabHovered, 0.80f, 0.20f, 0.36f);
+      c(ImGuiCol_ScrollbarGrabActive, 1.00f, 0.78f, 0.25f);
+      c(ImGuiCol_CheckMark, 1.00f, 0.80f, 0.28f);
+      c(ImGuiCol_SliderGrab, 1.00f, 0.78f, 0.25f);
+      c(ImGuiCol_SliderGrabActive, 1.00f, 0.88f, 0.45f);
+      c(ImGuiCol_Button, 0.45f, 0.07f, 0.17f);
+      c(ImGuiCol_ButtonHovered, 0.70f, 0.12f, 0.27f);
+      c(ImGuiCol_ButtonActive, 0.80f, 0.16f, 0.32f);
+      c(ImGuiCol_Header, 0.45f, 0.07f, 0.17f);
+      c(ImGuiCol_HeaderHovered, 0.70f, 0.12f, 0.27f);
+      c(ImGuiCol_HeaderActive, 0.80f, 0.16f, 0.32f);
+      c(ImGuiCol_Separator, 1.00f, 0.78f, 0.25f, 0.45f);
+      c(ImGuiCol_SeparatorHovered, 1.00f, 0.78f, 0.25f);
+      c(ImGuiCol_SeparatorActive, 1.00f, 0.88f, 0.45f);
+      c(ImGuiCol_ResizeGrip, 0.62f, 0.14f, 0.28f, 0.40f);
+      c(ImGuiCol_ResizeGripHovered, 0.80f, 0.20f, 0.36f, 0.70f);
+      c(ImGuiCol_ResizeGripActive, 1.00f, 0.78f, 0.25f, 0.90f);
+      c(ImGuiCol_Tab, 0.36f, 0.05f, 0.14f);
+      c(ImGuiCol_TabHovered, 0.70f, 0.12f, 0.27f);
+      c(ImGuiCol_TabSelected, 0.58f, 0.10f, 0.23f);
+      c(ImGuiCol_TabSelectedOverline, 1.00f, 0.78f, 0.25f);
+      c(ImGuiCol_TableHeaderBg, 0.36f, 0.05f, 0.14f);
       c(ImGuiCol_TableRowBgAlt, 1.00f, 1.00f, 1.00f, 0.04f);
-      c(ImGuiCol_TextSelectedBg, 0.90f, 0.38f, 0.58f, 0.40f);
-      c(ImGuiCol_NavCursor, 1.00f, 0.55f, 0.70f);
-      c(ImGuiCol_ModalWindowDimBg, 0.10f, 0.08f, 0.22f, 0.45f);
+      c(ImGuiCol_TextSelectedBg, 1.00f, 0.78f, 0.25f, 0.35f);
+      c(ImGuiCol_NavCursor, 1.00f, 0.80f, 0.28f);
+      c(ImGuiCol_ModalWindowDimBg, 0.08f, 0.00f, 0.03f, 0.55f);
       s.FrameBorderSize = 1.0f;
       break;
     }
@@ -834,7 +834,10 @@ void ApplyColorTheme(int theme_index)
     text = ImVec4(std::min(1.0f, text.x + 0.08f), std::min(1.0f, text.y + 0.08f),
                   std::min(1.0f, text.z + 0.08f), 1.0f);
     s.Colors[ImGuiCol_TextDisabled] = ImVec4(0.72f, 0.72f, 0.78f, 1.0f);
-    s.Colors[ImGuiCol_NavCursor] = ImVec4(1.0f, 0.45f, 0.62f, 1.0f);
+    s.Colors[ImGuiCol_NavCursor] = (theme_index == 12) ? ImVec4(1.0f, 0.80f, 0.28f, 1.0f) :
+                                                         ImVec4(1.0f, 0.45f, 0.62f, 1.0f);
+    if (theme_index == 12)
+      s.Colors[ImGuiCol_TextDisabled] = ImVec4(0.88f, 0.80f, 0.82f, 1.0f);
   }
 }
 
@@ -1018,8 +1021,8 @@ ImGuiFrontend::ImGuiFrontend()
   io.ConfigWindowsMoveFromTitleBarOnly = true;
   io.ConfigWindowsResizeFromEdges = true;
   
-  // bigger writing, easy to read from the sofa
-  io.FontGlobalScale = 2.4f;
+  // big, bold writing, easy to read from the sofa
+  io.FontGlobalScale = 3.0f;
   
   ciface::WGInput::Init();
   g_controller_interface.RefreshDevices();
@@ -1751,7 +1754,7 @@ FrontendResult ImGuiFrontend::CreateMainPage()
 //============================================================
 // Box-art grid home screen
 //
-// A console-style home screen: a soft lavender background, the
+// A console-style home screen: a deep burgundy background, the
 // game covers in rounded tiles (move with the D-pad or left stick,
 // A to play), a clock, the controller count, and round buttons down
 // both sides that show which controller button does what.
@@ -1761,17 +1764,17 @@ namespace
 {
 ImU32 GridInk(int alpha = 255)
 {
-  return IM_COL32(52, 52, 110, alpha);
+  return IM_COL32(255, 255, 255, alpha);  // white writing and symbols
 }
 
 ImU32 GridPill(int alpha = 170)
 {
-  return IM_COL32(255, 255, 255, alpha);
+  return IM_COL32(62, 8, 26, alpha);  // dark burgundy bubbles and tiles
 }
 
 ImU32 GridAccent(int alpha = 255)
 {
-  return IM_COL32(236, 72, 104, alpha);
+  return IM_COL32(255, 198, 64, alpha);  // bright gold: what is selected
 }
 
 void GridTextCentered(ImDrawList* dl, ImVec2 center, ImU32 col, const char* text, float scale = 1.0f)
@@ -1861,7 +1864,7 @@ void DrawGridSideButton(ImDrawList* dl, ImVec2 c, float scale, GridIcon icon, co
                         bool selected)
 {
   const float r = (selected ? 54.0f : 46.0f) * scale;
-  dl->AddCircleFilled(ImVec2(c.x, c.y + 3.0f * scale), r, IM_COL32(60, 50, 160, selected ? 70 : 40), 48);
+  dl->AddCircleFilled(ImVec2(c.x, c.y + 3.0f * scale), r, IM_COL32(0, 0, 0, selected ? 70 : 40), 48);
   dl->AddCircleFilled(c, r, GridPill(selected ? 255 : 215), 48);
   if (selected)
     dl->AddCircle(c, r, GridAccent(), 48, 5.0f * scale);
@@ -1999,10 +2002,10 @@ void ImGuiFrontend::DrawGridBackground()
   const ImVec2 size = ImGui::GetIO().DisplaySize;
   const float s = m_frame_scale;
 
-  // soft lavender-to-periwinkle wash
-  dl->AddRectFilledMultiColor(ImVec2(0, 0), size, IM_COL32(196, 188, 252, 255),
-                              IM_COL32(170, 176, 250, 255), IM_COL32(124, 132, 236, 255),
-                              IM_COL32(150, 142, 244, 255));
+  // deep burgundy wash
+  dl->AddRectFilledMultiColor(ImVec2(0, 0), size, IM_COL32(120, 20, 46, 255),
+                              IM_COL32(104, 16, 40, 255), IM_COL32(56, 6, 20, 255),
+                              IM_COL32(80, 10, 30, 255));
 
   // a few faint shapes drifting slowly, so the screen doesn't look flat
   const float time = static_cast<float>(ImGui::GetTime());
@@ -2023,13 +2026,13 @@ void ImGuiFrontend::DrawGridBackground()
     const ImVec2 c(b.x * size.x, b.y * size.y + bob);
     if (b.round)
     {
-      dl->AddCircle(c, b.w * 0.5f * s, IM_COL32(255, 255, 255, 45), 48, 4.0f * s);
+      dl->AddCircle(c, b.w * 0.5f * s, IM_COL32(255, 255, 255, 28), 48, 4.0f * s);
     }
     else
     {
       const ImVec2 half(b.w * 0.5f * s, b.h * 0.5f * s);
       dl->AddRect(ImVec2(c.x - half.x, c.y - half.y), ImVec2(c.x + half.x, c.y + half.y),
-                  IM_COL32(255, 255, 255, 40), half.y, 0, 4.0f * s);
+                  IM_COL32(255, 255, 255, 24), half.y, 0, 4.0f * s);
     }
   }
 }
@@ -2059,7 +2062,7 @@ void ImGuiFrontend::DrawGridChrome()
   // title and category (top middle)
   {
     const ImVec2 c(size.x * 0.5f, margin * 0.6f + 46.0f * s);
-    dl->AddCircleFilled(ImVec2(c.x, c.y + 3.0f * s), 44.0f * s, IM_COL32(60, 50, 160, 40), 48);
+    dl->AddCircleFilled(ImVec2(c.x, c.y + 3.0f * s), 44.0f * s, IM_COL32(0, 0, 0, 40), 48);
     dl->AddCircleFilled(c, 44.0f * s, GridPill(230), 48);
     dl->AddCircle(c, 32.0f * s, GridAccent(), 48, 5.0f * s);
     GridTextCentered(dl, c, GridAccent(), "D", 1.1f);
@@ -2223,7 +2226,7 @@ FrontendResult ImGuiFrontend::CreateGridPage()
 
       // tile
       dl->AddRectFilled(ImVec2(a.x, a.y + 5.0f * s), ImVec2(b.x, b.y + 5.0f * s),
-                        IM_COL32(60, 50, 160, selected ? 70 : 35), rounding);
+                        IM_COL32(0, 0, 0, selected ? 70 : 35), rounding);
       dl->AddRectFilled(a, b, GridPill(selected ? 240 : 190), rounding);
 
       // cover, keeping its shape
@@ -2247,7 +2250,7 @@ FrontendResult ImGuiFrontend::CreateGridPage()
       }
       else
       {
-        dl->AddRectFilled(ca, cb, GridInk(200), 6.0f * s);
+        dl->AddRectFilled(ca, cb, IM_COL32(36, 4, 14, 255), 6.0f * s);
         const std::string name = game->GetName(m_title_database);
         dl->PushClipRect(ca, cb, true);
         GridTextCentered(dl, c, IM_COL32_WHITE, name.c_str(), 0.6f);
