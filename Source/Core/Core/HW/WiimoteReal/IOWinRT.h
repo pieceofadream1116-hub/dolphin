@@ -14,6 +14,9 @@
 
 #ifdef WINRT_XBOX
 
+// C++/WinRT headers trip C4946 (warnings are errors here).
+#pragma warning(disable : 4946)
+
 #include <condition_variable>
 #include <deque>
 #include <mutex>
