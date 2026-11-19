@@ -771,54 +771,54 @@ void ApplyColorTheme(int theme_index)
       s.Colors[ImGuiCol_HeaderActive] = ImVec4(0.35f, 0.58f, 0.48f, 1.00f);
       s.Colors[ImGuiCol_Text] = ImVec4(0.85f, 0.95f, 0.90f, 1.00f);
       break;
-    case 12: // Bright Lavender: light, high-contrast, matches the box-art grid
+    case 12: // Lavender: deep lavender windows with big white writing, matches the box-art grid
     {
-      ImGui::StyleColorsLight();
+      ImGui::StyleColorsDark();
       auto c = [&s](ImGuiCol idx, float r, float g, float b, float a = 1.0f) {
         s.Colors[idx] = ImVec4(r, g, b, a);
       };
-      c(ImGuiCol_Text, 0.08f, 0.08f, 0.24f);
-      c(ImGuiCol_TextDisabled, 0.38f, 0.38f, 0.55f);
-      c(ImGuiCol_WindowBg, 0.97f, 0.96f, 1.00f, 0.97f);
-      c(ImGuiCol_ChildBg, 1.00f, 1.00f, 1.00f, 0.55f);
-      c(ImGuiCol_PopupBg, 0.99f, 0.98f, 1.00f, 0.99f);
-      c(ImGuiCol_Border, 0.60f, 0.56f, 0.92f, 0.55f);
+      c(ImGuiCol_Text, 1.00f, 1.00f, 1.00f);
+      c(ImGuiCol_TextDisabled, 0.80f, 0.78f, 0.92f);
+      c(ImGuiCol_WindowBg, 0.20f, 0.17f, 0.38f, 0.96f);
+      c(ImGuiCol_ChildBg, 0.24f, 0.21f, 0.44f, 0.60f);
+      c(ImGuiCol_PopupBg, 0.22f, 0.19f, 0.42f, 0.99f);
+      c(ImGuiCol_Border, 0.62f, 0.56f, 0.95f, 0.45f);
       c(ImGuiCol_BorderShadow, 0.00f, 0.00f, 0.00f, 0.00f);
-      c(ImGuiCol_FrameBg, 1.00f, 1.00f, 1.00f, 1.00f);
-      c(ImGuiCol_FrameBgHovered, 0.90f, 0.88f, 1.00f, 1.00f);
-      c(ImGuiCol_FrameBgActive, 0.83f, 0.80f, 1.00f, 1.00f);
-      c(ImGuiCol_TitleBg, 0.80f, 0.76f, 1.00f);
-      c(ImGuiCol_TitleBgActive, 0.72f, 0.66f, 0.99f);
-      c(ImGuiCol_TitleBgCollapsed, 0.80f, 0.76f, 1.00f, 0.80f);
-      c(ImGuiCol_MenuBarBg, 0.92f, 0.90f, 1.00f);
-      c(ImGuiCol_ScrollbarBg, 0.90f, 0.89f, 1.00f, 0.60f);
-      c(ImGuiCol_ScrollbarGrab, 0.66f, 0.60f, 0.98f, 0.85f);
-      c(ImGuiCol_ScrollbarGrabHovered, 0.58f, 0.52f, 0.96f);
-      c(ImGuiCol_ScrollbarGrabActive, 0.92f, 0.36f, 0.52f);
-      c(ImGuiCol_CheckMark, 0.86f, 0.24f, 0.40f);
-      c(ImGuiCol_SliderGrab, 0.62f, 0.56f, 0.98f);
-      c(ImGuiCol_SliderGrabActive, 0.86f, 0.24f, 0.40f);
-      c(ImGuiCol_Button, 0.82f, 0.78f, 1.00f);
-      c(ImGuiCol_ButtonHovered, 0.97f, 0.62f, 0.72f);
-      c(ImGuiCol_ButtonActive, 0.93f, 0.44f, 0.58f);
-      c(ImGuiCol_Header, 0.84f, 0.80f, 1.00f);
-      c(ImGuiCol_HeaderHovered, 0.97f, 0.66f, 0.75f);
-      c(ImGuiCol_HeaderActive, 0.93f, 0.48f, 0.62f);
-      c(ImGuiCol_Separator, 0.62f, 0.58f, 0.92f, 0.70f);
-      c(ImGuiCol_SeparatorHovered, 0.93f, 0.44f, 0.58f);
-      c(ImGuiCol_SeparatorActive, 0.86f, 0.24f, 0.40f);
-      c(ImGuiCol_ResizeGrip, 0.62f, 0.56f, 0.98f, 0.40f);
-      c(ImGuiCol_ResizeGripHovered, 0.93f, 0.44f, 0.58f, 0.70f);
-      c(ImGuiCol_ResizeGripActive, 0.86f, 0.24f, 0.40f, 0.90f);
-      c(ImGuiCol_Tab, 0.86f, 0.83f, 1.00f);
-      c(ImGuiCol_TabHovered, 0.97f, 0.62f, 0.72f);
-      c(ImGuiCol_TabSelected, 0.72f, 0.66f, 0.99f);
-      c(ImGuiCol_TabSelectedOverline, 0.86f, 0.24f, 0.40f);
-      c(ImGuiCol_TableHeaderBg, 0.86f, 0.83f, 1.00f);
-      c(ImGuiCol_TableRowBgAlt, 0.94f, 0.93f, 1.00f, 0.60f);
-      c(ImGuiCol_TextSelectedBg, 0.93f, 0.44f, 0.58f, 0.35f);
-      c(ImGuiCol_NavCursor, 0.90f, 0.22f, 0.40f);
-      c(ImGuiCol_ModalWindowDimBg, 0.30f, 0.26f, 0.60f, 0.35f);
+      c(ImGuiCol_FrameBg, 0.31f, 0.27f, 0.56f);
+      c(ImGuiCol_FrameBgHovered, 0.40f, 0.35f, 0.68f);
+      c(ImGuiCol_FrameBgActive, 0.48f, 0.42f, 0.78f);
+      c(ImGuiCol_TitleBg, 0.26f, 0.22f, 0.50f);
+      c(ImGuiCol_TitleBgActive, 0.34f, 0.29f, 0.62f);
+      c(ImGuiCol_TitleBgCollapsed, 0.26f, 0.22f, 0.50f, 0.80f);
+      c(ImGuiCol_MenuBarBg, 0.24f, 0.21f, 0.46f);
+      c(ImGuiCol_ScrollbarBg, 0.16f, 0.14f, 0.32f, 0.60f);
+      c(ImGuiCol_ScrollbarGrab, 0.52f, 0.46f, 0.88f, 0.85f);
+      c(ImGuiCol_ScrollbarGrabHovered, 0.62f, 0.56f, 0.96f);
+      c(ImGuiCol_ScrollbarGrabActive, 0.93f, 0.40f, 0.58f);
+      c(ImGuiCol_CheckMark, 1.00f, 0.55f, 0.70f);
+      c(ImGuiCol_SliderGrab, 0.72f, 0.66f, 1.00f);
+      c(ImGuiCol_SliderGrabActive, 1.00f, 0.55f, 0.70f);
+      c(ImGuiCol_Button, 0.40f, 0.34f, 0.72f);
+      c(ImGuiCol_ButtonHovered, 0.90f, 0.38f, 0.58f);
+      c(ImGuiCol_ButtonActive, 0.80f, 0.28f, 0.48f);
+      c(ImGuiCol_Header, 0.40f, 0.34f, 0.72f);
+      c(ImGuiCol_HeaderHovered, 0.90f, 0.38f, 0.58f);
+      c(ImGuiCol_HeaderActive, 0.80f, 0.28f, 0.48f);
+      c(ImGuiCol_Separator, 0.55f, 0.50f, 0.90f, 0.60f);
+      c(ImGuiCol_SeparatorHovered, 0.90f, 0.38f, 0.58f);
+      c(ImGuiCol_SeparatorActive, 0.80f, 0.28f, 0.48f);
+      c(ImGuiCol_ResizeGrip, 0.52f, 0.46f, 0.88f, 0.40f);
+      c(ImGuiCol_ResizeGripHovered, 0.90f, 0.38f, 0.58f, 0.70f);
+      c(ImGuiCol_ResizeGripActive, 0.80f, 0.28f, 0.48f, 0.90f);
+      c(ImGuiCol_Tab, 0.30f, 0.26f, 0.56f);
+      c(ImGuiCol_TabHovered, 0.90f, 0.38f, 0.58f);
+      c(ImGuiCol_TabSelected, 0.48f, 0.41f, 0.82f);
+      c(ImGuiCol_TabSelectedOverline, 1.00f, 0.55f, 0.70f);
+      c(ImGuiCol_TableHeaderBg, 0.30f, 0.26f, 0.56f);
+      c(ImGuiCol_TableRowBgAlt, 1.00f, 1.00f, 1.00f, 0.04f);
+      c(ImGuiCol_TextSelectedBg, 0.90f, 0.38f, 0.58f, 0.40f);
+      c(ImGuiCol_NavCursor, 1.00f, 0.55f, 0.70f);
+      c(ImGuiCol_ModalWindowDimBg, 0.10f, 0.08f, 0.22f, 0.45f);
       s.FrameBorderSize = 1.0f;
       break;
     }
@@ -828,7 +828,7 @@ void ApplyColorTheme(int theme_index)
   }
 
   // brighter writing on the dark themes, so menu text is easy to read on a TV
-  if (theme_index != 1 && theme_index != 12)
+  if (theme_index != 1)
   {
     ImVec4& text = s.Colors[ImGuiCol_Text];
     text = ImVec4(std::min(1.0f, text.x + 0.08f), std::min(1.0f, text.y + 0.08f),
@@ -1018,7 +1018,8 @@ ImGuiFrontend::ImGuiFrontend()
   io.ConfigWindowsMoveFromTitleBarOnly = true;
   io.ConfigWindowsResizeFromEdges = true;
   
-  io.FontGlobalScale = 2.0f;
+  // bigger writing, easy to read from the sofa
+  io.FontGlobalScale = 2.4f;
   
   ciface::WGInput::Init();
   g_controller_interface.RefreshDevices();
@@ -1999,9 +2000,9 @@ void ImGuiFrontend::DrawGridBackground()
   const float s = m_frame_scale;
 
   // soft lavender-to-periwinkle wash
-  dl->AddRectFilledMultiColor(ImVec2(0, 0), size, IM_COL32(226, 220, 255, 255),
-                              IM_COL32(204, 210, 255, 255), IM_COL32(168, 176, 252, 255),
-                              IM_COL32(192, 184, 255, 255));
+  dl->AddRectFilledMultiColor(ImVec2(0, 0), size, IM_COL32(196, 188, 252, 255),
+                              IM_COL32(170, 176, 250, 255), IM_COL32(124, 132, 236, 255),
+                              IM_COL32(150, 142, 244, 255));
 
   // a few faint shapes drifting slowly, so the screen doesn't look flat
   const float time = static_cast<float>(ImGui::GetTime());
@@ -2840,36 +2841,39 @@ std::pair<int, int> ImGuiFrontend::GetAchievementCountsForGame(const std::string
 namespace
 {
 std::mutex s_game_cache_mutex;
-UICommon::GameFileCache s_game_cache;
-bool s_game_cache_loaded = false;
+// made on first use, after the user folder is known (its file lives in User/Cache)
+std::unique_ptr<UICommon::GameFileCache> s_game_cache;
 
 std::vector<std::shared_ptr<UICommon::GameFile>>
 ScanGamesCached(const std::vector<std::string>& game_paths, std::atomic<size_t>* progress)
 {
-  std::vector<std::shared_ptr<UICommon::GameFile>> games;
-  games.reserve(game_paths.size());
-
   std::lock_guard lk(s_game_cache_mutex);
-  if (!s_game_cache_loaded)
+  if (!s_game_cache)
   {
-    s_game_cache.Load();
-    s_game_cache_loaded = true;
+    s_game_cache = std::make_unique<UICommon::GameFileCache>();
+    s_game_cache->Load();
   }
 
-  bool changed = false;
+  // adds new games, drops ones that are gone; known games aren't reopened. (No cover
+  // downloads here: those happen in the background as the tiles are drawn.)
+  if (s_game_cache->Update(game_paths))
+    s_game_cache->Save();
+
+  std::unordered_map<std::string, std::shared_ptr<UICommon::GameFile>> by_path;
+  s_game_cache->ForEach([&by_path](const std::shared_ptr<const UICommon::GameFile>& game) {
+    by_path.emplace(game->GetFilePath(), std::const_pointer_cast<UICommon::GameFile>(game));
+  });
+
+  std::vector<std::shared_ptr<UICommon::GameFile>> games;
+  games.reserve(game_paths.size());
   for (const auto& path : game_paths)
   {
-    bool this_changed = false;
-    std::shared_ptr<const UICommon::GameFile> game = s_game_cache.AddOrGet(path, &this_changed);
-    changed |= this_changed;
-    if (game && game->IsValid())
-      games.emplace_back(std::const_pointer_cast<UICommon::GameFile>(game));
+    auto it = by_path.find(path);
+    if (it != by_path.end() && it->second && it->second->IsValid())
+      games.emplace_back(it->second);
     if (progress)
       (*progress)++;
   }
-
-  if (changed)
-    s_game_cache.Save();
   return games;
 }
 
