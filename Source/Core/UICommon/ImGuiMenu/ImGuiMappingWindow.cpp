@@ -4,6 +4,7 @@
 #include <format>
 #include <functional>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -35,6 +36,43 @@ static std::vector<std::function<void()>> s_pendingBinds;
 // which button is being captured, and since when (so each capture gets its own 15 seconds)
 static ::ControlReference* s_capture_ref = nullptr;
 static std::chrono::steady_clock::time_point s_capture_since;
+// after a capture: when it finished (a new one can't start for a moment, so one press can't
+// start the next box too) and which box to put the highlight back on
+static std::chrono::steady_clock::time_point s_capture_done;
+static ::ControlReference* s_refocus_ref = nullptr;
+
+// Called right after each mapping box is drawn: puts the highlight back on the box that was
+// just remapped, instead of letting it jump to the first box (A) on the page.
+static void RefocusIfNeeded(::ControlReference* ref)
+{
+  if (ref == nullptr || ref != s_refocus_ref)
+    return;
+  ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
+  ImGui::GetCurrentContext()->NavCursorVisible = true;
+  ImGui::SetScrollHereY(0.5f);
+  s_refocus_ref = nullptr;
+}
+
+// Live list of what the device is sending right now, e.g. "Cross, R1".
+static std::string ActiveInputs(const ciface::Core::DeviceQualifier& dq)
+{
+  auto device = g_controller_interface.FindDevice(dq);
+  if (!device)
+    return "(not connected)";
+  std::string out;
+  for (auto* input : device->Inputs())
+  {
+    if (!input->IsDetectable())
+      continue;
+    if (input->GetState() > 0.5)
+    {
+      if (!out.empty())
+        out += ", ";
+      out += input->GetName();
+    }
+  }
+  return out.empty() ? "nothing pressed" : out;
+}
 
 void ImGuiMappingWindow::Draw(int port, UIState* state)
 {
@@ -72,6 +110,14 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
     constexpr auto GRACE = std::chrono::milliseconds(700);
     constexpr auto LISTEN = std::chrono::seconds(15);
 
+    if (s_capture_ref != state->capturingRef && Clock::now() - s_capture_done <
+                                                     std::chrono::milliseconds(500))
+    {
+      // the same press that finished the last box: don't start another one
+      state->capturingRef = nullptr;
+      ImGui::End();
+      return;
+    }
     if (s_capture_ref != state->capturingRef)
     {
       s_capture_ref = state->capturingRef;
@@ -102,6 +148,24 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
     ImGui::Text("Press the button now (%d seconds left)", static_cast<int>(std::max<long long>(0, left.count())));
     ImGui::TextUnformatted(("Listening only to: " + device_name).c_str());
 
+    ImGui::TextUnformatted(("Sending now: " + ActiveInputs(def)).c_str());
+    const bool listening_to_menu_pad = device_name == g_controller_interface.GetDefaultDeviceString();
+    if (!listening_to_menu_pad)
+      ImGui::TextUnformatted("B on the Xbox controller: cancel");
+    if (!listening_to_menu_pad && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))
+    {
+      // eat this B press so it doesn't also close the whole Remap screen
+      ImGui::SetKeyOwner(ImGuiKey_GamepadFaceRight, ImGui::GetID("##cancel_capture"),
+                         ImGuiInputFlags_LockUntilRelease);
+      s_refocus_ref = state->capturingRef;
+      s_capture_done = Clock::now();
+      state->capturingRef = nullptr;
+      s_capture_ref = nullptr;
+      state->mappingInputDetector.reset();
+      ImGui::End();
+      return;
+    }
+
     state->mappingInputDetector->Update(LISTEN, std::chrono::milliseconds(300), LISTEN);
     if (state->mappingInputDetector->IsComplete())
     {
@@ -111,14 +175,15 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
       {
         auto expr = ciface::MappingCommon::BuildExpression(results, def,
                                                            ciface::MappingCommon::Quote::On);
+        // set it right now, on exactly this one box (not later, when things may have changed)
         auto* ref = state->capturingRef;
-        auto* ctrl = controller;
-        s_pendingBinds.emplace_back([ref, ctrl, expr]() {
-          ref->SetExpression(expr);
-          ctrl->UpdateSingleControlReference(g_controller_interface, ref);
-        });
+        const auto lock = ControllerEmu::EmulatedController::GetStateLock();
+        ref->SetExpression(expr);
+        controller->UpdateSingleControlReference(g_controller_interface, ref);
       }
       // done, or nothing pressed in 15 seconds: stop waiting so the menus never stay locked
+      s_refocus_ref = state->capturingRef;
+      s_capture_done = Clock::now();
       state->capturingRef = nullptr;
       s_capture_ref = nullptr;
       state->mappingInputDetector.reset();
@@ -147,6 +212,9 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
   }
   ImGui::SameLine();
   ImGui::TextDisabled("B or Menu: save and close");
+  // press any button on the controller and see the name it comes through as
+  ImGui::TextUnformatted(
+      ("This controller is sending: " + ActiveInputs(controller->GetDefaultDevice())).c_str());
   ImGui::Spacing();
 
   // The real Extension group (its ui name is "Extension"; looking it up as "Attachments" found
@@ -208,6 +276,7 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
                 state->capturingRef = ctl->control_ref.get();
                 state->mappingInputDetector.reset();
               }
+              RefocusIfNeeded(ctl->control_ref.get());
               ImGui::SameLine();
               ImGui::Text("%.2f", ctl->GetState());
             }
@@ -261,6 +330,7 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
                 state->capturingRef = ctl->control_ref.get();
                 state->mappingInputDetector.reset();
               }
+              RefocusIfNeeded(ctl->control_ref.get());
               ImGui::SameLine();
               ImGui::Text("%.2f", ctl->GetState());
             }
@@ -296,6 +366,7 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
                 state->capturingRef = ctl->control_ref.get();
                 state->mappingInputDetector.reset();
               }
+              RefocusIfNeeded(ctl->control_ref.get());
               ImGui::SameLine();
               ImGui::Text("%.2f", ctl->GetState());
             }
@@ -336,6 +407,7 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
                   state->capturingRef = ctl->control_ref.get();
                   state->mappingInputDetector.reset();
                 }
+                RefocusIfNeeded(ctl->control_ref.get());
                 ImGui::SameLine();
                 ImGui::Text("%.2f", ctl->GetState());
               }
@@ -376,6 +448,7 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
                 state->capturingRef = ctl->control_ref.get();
                 state->mappingInputDetector.reset();
               }
+              RefocusIfNeeded(ctl->control_ref.get());
               ImGui::SameLine();
               ImGui::Text("%.2f", ctl->GetState());
             }
@@ -424,6 +497,7 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
                   state->capturingRef = ctl->control_ref.get();
                   state->mappingInputDetector.reset();
                 }
+                RefocusIfNeeded(ctl->control_ref.get());
                 ImGui::SameLine();
                 ImGui::Text("%.2f", ctl->GetState());
               }
@@ -461,6 +535,7 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
                 state->capturingRef = ctl->control_ref.get();
                 state->mappingInputDetector.reset();
               }
+              RefocusIfNeeded(ctl->control_ref.get());
               ImGui::SameLine();
               ImGui::Text("%.2f", ctl->GetState());
             }
@@ -562,6 +637,7 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
                 state->capturingRef = ctl->control_ref.get();
                 state->mappingInputDetector.reset();
               }
+              RefocusIfNeeded(ctl->control_ref.get());
               ImGui::SameLine();
               ImGui::Text("%.2f", ctl->GetState());
             }

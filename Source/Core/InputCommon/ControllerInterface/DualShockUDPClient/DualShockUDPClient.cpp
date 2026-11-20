@@ -183,6 +183,29 @@ private:
     const ControlState m_offset;
   };
 
+  // A button some DSU servers send only as an on/off bit and others only as a pressure byte
+  // (WiimoteHook does the bit for some buttons). Pressed if either says so.
+  class PressureOrBit final : public Input
+  {
+  public:
+    PressureOrBit(const char* name, const u8& pressure, const u8& bits, u8 mask)
+        : m_name(name), m_pressure(pressure), m_bits(bits), m_mask(mask)
+    {
+    }
+    std::string GetName() const override { return m_name; }
+    ControlState GetState() const override
+    {
+      const ControlState analog = ControlState(m_pressure) / 255.0;
+      return (m_bits & m_mask) != 0 ? 1.0 : analog;
+    }
+
+  private:
+    const char* const m_name;
+    const u8& m_pressure;
+    const u8& m_bits;
+    const u8 m_mask;
+  };
+
   class TouchInput final : public AnalogInput<int>
   {
   public:
@@ -670,19 +693,24 @@ Device::Device(std::string name, int index, std::string server_address, u16 serv
 {
   m_socket.setBlocking(false);
 
-  AddInput(new AnalogInput<u8>("Pad W", m_pad_data.button_dpad_left_analog, 255));
-  AddInput(new AnalogInput<u8>("Pad S", m_pad_data.button_dpad_down_analog, 255));
-  AddInput(new AnalogInput<u8>("Pad E", m_pad_data.button_dpad_right_analog, 255));
-  AddInput(new AnalogInput<u8>("Pad N", m_pad_data.button_dpad_up_analog, 255));
-  AddInput(new AnalogInput<u8>("Square", m_pad_data.button_square_analog, 255));
-  AddInput(new AnalogInput<u8>("Cross", m_pad_data.button_cross_analog, 255));
-  AddInput(new AnalogInput<u8>("Circle", m_pad_data.button_circle_analog, 255));
-  AddInput(new AnalogInput<u8>("Triangle", m_pad_data.button_triangle_analog, 255));
-  AddInput(new AnalogInput<u8>("L1", m_pad_data.button_l1_analog, 255));
-  AddInput(new AnalogInput<u8>("R1", m_pad_data.button_r1_analog, 255));
+  // cemuhook buttons1: 0x80 left, 0x40 down, 0x20 right, 0x10 up, 0x08 Options, 0x04 R3,
+  // 0x02 L3, 0x01 Share.  buttons2: 0x80 Square, 0x40 Cross, 0x20 Circle, 0x10 Triangle,
+  // 0x08 R1, 0x04 L1, 0x02 R2, 0x01 L2.
+  const u8& b1 = m_pad_data.button_states1;
+  const u8& b2 = m_pad_data.button_states2;
+  AddInput(new PressureOrBit("Pad W", m_pad_data.button_dpad_left_analog, b1, 0x80));
+  AddInput(new PressureOrBit("Pad S", m_pad_data.button_dpad_down_analog, b1, 0x40));
+  AddInput(new PressureOrBit("Pad E", m_pad_data.button_dpad_right_analog, b1, 0x20));
+  AddInput(new PressureOrBit("Pad N", m_pad_data.button_dpad_up_analog, b1, 0x10));
+  AddInput(new PressureOrBit("Square", m_pad_data.button_square_analog, b2, 0x80));
+  AddInput(new PressureOrBit("Cross", m_pad_data.button_cross_analog, b2, 0x40));
+  AddInput(new PressureOrBit("Circle", m_pad_data.button_circle_analog, b2, 0x20));
+  AddInput(new PressureOrBit("Triangle", m_pad_data.button_triangle_analog, b2, 0x10));
+  AddInput(new PressureOrBit("L1", m_pad_data.button_l1_analog, b2, 0x04));
+  AddInput(new PressureOrBit("R1", m_pad_data.button_r1_analog, b2, 0x08));
 
-  AddInput(new AnalogInput<u8>("L2", m_pad_data.trigger_l2, 255));
-  AddInput(new AnalogInput<u8>("R2", m_pad_data.trigger_r2, 255));
+  AddInput(new PressureOrBit("L2", m_pad_data.trigger_l2, b2, 0x01));
+  AddInput(new PressureOrBit("R2", m_pad_data.trigger_r2, b2, 0x02));
 
   AddInput(new Button<u8>("L3", m_pad_data.button_states1, 0x2));
   AddInput(new Button<u8>("R3", m_pad_data.button_states1, 0x4));
