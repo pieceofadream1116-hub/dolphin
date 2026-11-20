@@ -8,6 +8,9 @@
 #include <chrono>
 #include <tuple>
 
+#include <map>
+#include <mutex>
+#include <vector>
 #include <SFML/Network/SocketSelector.hpp>
 #include <SFML/Network/UdpSocket.hpp>
 #include <fmt/format.h>
@@ -42,6 +45,98 @@ const Config::Info<bool> SERVERS_ENABLED{{Config::System::DualShockUDPClient, "S
 
 // Clock type used for querying timeframes
 using SteadyClock = std::chrono::steady_clock;
+
+// What each DSU server (e.g. WiimoteHook on a PC) has done, shown live under
+// Alternate Input Sources so you can tell where the connection stops.
+namespace
+{
+struct ServerStatus
+{
+  u64 sent = 0;
+  u64 send_failed = 0;
+  u64 replies = 0;
+  u64 refused = 0;
+  bool bad_address = false;
+  u32 pads = 0;
+  bool any_reply = false;
+  bool any_data = false;
+  SteadyClock::time_point last_reply{};
+  SteadyClock::time_point last_data{};
+};
+std::mutex s_status_mutex;
+std::map<std::string, ServerStatus> s_status;
+
+ServerStatus& StatusFor(const std::string& address, u16 port)
+{
+  return s_status[fmt::format("{}:{}", address, port)];
+}
+
+std::string Ago(SteadyClock::time_point t)
+{
+  const auto secs =
+      std::chrono::duration_cast<std::chrono::seconds>(SteadyClock::now() - t).count();
+  if (secs < 2)
+    return "just now";
+  if (secs < 120)
+    return fmt::format("{} seconds ago", secs);
+  return fmt::format("{} minutes ago", secs / 60);
+}
+}  // namespace
+
+std::vector<std::string> GetServerStatusLines()
+{
+  std::vector<std::string> lines;
+  if (!Config::Get(Settings::SERVERS_ENABLED))
+  {
+    lines.emplace_back("DSU is off: tick \"Enable DSU\" above.");
+    return lines;
+  }
+  for (const auto& entry : SplitString(Config::Get(Settings::SERVERS), ';'))
+  {
+    const auto info = SplitString(entry, ':');
+    if (info.size() < 3)
+      continue;
+    const std::string key = fmt::format("{}:{}", info[1], info[2]);
+    ServerStatus st;
+    {
+      std::lock_guard lk(s_status_mutex);
+      const auto it = s_status.find(key);
+      if (it != s_status.end())
+        st = it->second;
+    }
+    std::string line = key + ": ";
+    if (st.bad_address)
+      line += "that address can't be read. Check the numbers.";
+    else if (st.sent == 0 && st.send_failed == 0)
+      line += "not asked yet (give it a few seconds).";
+    else if (st.sent == 0)
+      line += fmt::format("Dolphin couldn't send to it ({} tries). Is the Xbox on the network?",
+                          st.send_failed);
+    else if (!st.any_reply && st.refused > 0)
+      line += fmt::format("asked {} times. The PC answered that nothing is listening on that "
+                          "port: WiimoteHook isn't running, or uses another port.",
+                          st.sent);
+    else if (!st.any_reply)
+      line += fmt::format("asked {} times, no reply yet. Is WiimoteHook running with Server_IP "
+                          "0.0.0.0, and allowed through the PC's firewall?",
+                          st.sent);
+    else
+    {
+      line += fmt::format("WiimoteHook replied {} times (last {}). Controllers it has: {}.",
+                          st.replies, Ago(st.last_reply), st.pads);
+      if (st.any_data)
+        line += fmt::format(" Wii Remote data: last {}.", Ago(st.last_data));
+      else if (st.pads > 0)
+        line += " No button data yet: pick DSUClient in a port's Device list.";
+      else
+        line += " Press 1+2 on the Wii Remote so WiimoteHook connects it.";
+    }
+    lines.push_back(std::move(line));
+  }
+  if (lines.empty())
+    lines.emplace_back("No server added yet: enter the PC's address and press Add Server.");
+  return lines;
+}
 
 class Device final : public Core::Device
 {
@@ -261,9 +356,23 @@ void InputBackend::HotplugThreadFunc()
         list_ports.pad_request_count = SERVER_ASKED_PADS;
         list_ports.pad_ids = {0, 1, 2, 3};
         msg.Finish();
-        if (server.m_socket.send(&list_ports, sizeof list_ports,
-                                 sf::IpAddress::resolve(server.m_address).value(),
-                                 server.m_port) != sf::Socket::Status::Done)
+        const auto address = sf::IpAddress::resolve(server.m_address);
+        if (!address)
+        {
+          std::lock_guard lk(s_status_mutex);
+          StatusFor(server.m_address, server.m_port).bad_address = true;
+          timed_out_servers[i] = true;
+          continue;
+        }
+        const bool sent = server.m_socket.send(&list_ports, sizeof list_ports, *address,
+                                               server.m_port) == sf::Socket::Status::Done;
+        {
+          std::lock_guard lk(s_status_mutex);
+          ServerStatus& st = StatusFor(server.m_address, server.m_port);
+          st.bad_address = false;
+          (sent ? st.sent : st.send_failed)++;
+        }
+        if (!sent)
         {
           ERROR_LOG_FMT(CONTROLLERINTERFACE, "DualShockUDPClient HotplugThreadFunc send failed");
         }
@@ -308,11 +417,30 @@ void InputBackend::HotplugThreadFunc()
           if (server.m_socket.receive(&msg, sizeof(msg), received_bytes, sender, port) !=
               sf::Socket::Status::Done)
           {
+            // on Windows/Xbox a UDP "port unreachable" reply shows up as a receive error
+            std::lock_guard lk(s_status_mutex);
+            StatusFor(server.m_address, server.m_port).refused++;
             continue;
+          }
+
+          {
+            std::lock_guard lk(s_status_mutex);
+            ServerStatus& st = StatusFor(server.m_address, server.m_port);
+            st.replies++;
+            st.any_reply = true;
+            st.last_reply = SteadyClock::now();
           }
 
           if (auto port_info = msg.CheckAndCastTo<Proto::MessageType::PortInfo>())
           {
+            {
+              std::lock_guard lk(s_status_mutex);
+              ServerStatus& st = StatusFor(server.m_address, server.m_port);
+              const u32 bit = 1u << (port_info->pad_id & 7);
+              st.pads = (port_info->pad_state == Proto::DsState::Connected) ?
+                            (st.pads | bit) :
+                            (st.pads & ~bit);
+            }
             server.m_disconnect_time = SteadyClock::now() + SERVER_UNRESPONSIVE_INTERVAL;
             // We have receive at least one valid update, that's enough. This is needed to avoid
             // false positive when checking for disconnection in case our thread waited too long
@@ -643,6 +771,12 @@ Core::DeviceRemoval Device::UpdateInput()
   {
     if (auto pad_data = msg.CheckAndCastTo<Proto::MessageType::PadDataResponse>())
     {
+      {
+        std::lock_guard lk(s_status_mutex);
+        ServerStatus& st = StatusFor(m_server_address, m_server_port);
+        st.any_data = true;
+        st.last_data = SteadyClock::now();
+      }
       m_pad_data = *pad_data;
 
       // Update touch pad relative coordinates

@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <string>
+#include <vector>
+
 #include "Common/Config/Config.h"
 #include "InputCommon/ControllerInterface/InputBackend.h"
 
@@ -22,5 +25,9 @@ extern const Config::Info<bool> SERVERS_ENABLED;
 }  // namespace Settings
 
 std::unique_ptr<ciface::InputBackend> CreateInputBackend(ControllerInterface* controller_interface);
+
+// One line per server: whether Dolphin is asking it for controllers, whether it replied,
+// how many controllers it has and when button data last arrived.
+std::vector<std::string> GetServerStatusLines();
 
 }  // namespace ciface::DualShockUDPClient

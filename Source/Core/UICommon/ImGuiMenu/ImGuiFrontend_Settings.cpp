@@ -1401,6 +1401,14 @@ void CreateControlsTab(UIState* state)
         if (ImGui::Selectable(entries[i].c_str(), selected_dsu == i))
           selected_dsu = i;
       }
+
+      // live status: is Dolphin asking the PC, is WiimoteHook answering, is button data arriving
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.82f, 0.35f, 1.0f));
+      ImGui::PushTextWrapPos(0.0f);
+      for (const std::string& line : ciface::DualShockUDPClient::GetServerStatusLines())
+        ImGui::TextUnformatted(line.c_str());
+      ImGui::PopTextWrapPos();
+      ImGui::PopStyleColor();
       ImGui::Separator();
       static char dsu_addr[64] = "";
       static int dsu_port = ciface::DualShockUDPClient::DEFAULT_SERVER_PORT;
