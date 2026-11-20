@@ -3,6 +3,7 @@
 
 // Standard Library
 #include <algorithm>
+#include <cstring>
 #include <atomic>
 #include <chrono>
 #include <future>
@@ -1200,10 +1201,12 @@ void CreateWiiPort(int index, std::vector<std::string> devices)
   const bool is_real =
       Config::Get(Config::GetInfoForWiimoteSource(index)) == WiimoteSource::Real;
   const std::string bar_status = is_real ? WiimoteReal::GetWinRTWiimoteStatus() : std::string();
-  const int status_lines =
-      bar_status.empty() ? 0 : 1 + static_cast<int>(std::count(bar_status.begin(), bar_status.end(), '\n'));
-  const float child_h = 75 * m_frame_scale + status_lines * ImGui::GetTextLineHeightWithSpacing();
-  if (ImGui::BeginChild(fmt::format("gc-wii-{}", index).c_str(), ImVec2(-1, child_h), true))
+  // the box grows to fit the Dolphin Bar status, however many lines it has
+  const ImGuiChildFlags child_flags =
+      bar_status.empty() ? ImGuiChildFlags_Borders :
+                           (ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
+  if (ImGui::BeginChild(fmt::format("gc-wii-{}", index).c_str(),
+                        ImVec2(-1, bar_status.empty() ? 75 * m_frame_scale : 0), child_flags))
   {
     auto controller = Wiimote::GetConfig()->GetController(index);
     auto default_device = controller->GetDefaultDevice().name;
@@ -1213,7 +1216,9 @@ void CreateWiiPort(int index, std::vector<std::string> devices)
     {
       // what the DolphinBar search sees right now
       ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.82f, 0.35f, 1.0f));
+      ImGui::PushTextWrapPos(0.0f);  // wrap at the box edge instead of cutting off
       ImGui::TextUnformatted(bar_status.c_str());
+      ImGui::PopTextWrapPos();
       ImGui::PopStyleColor();
     }
     if (is_real && m_selected_wiimote_profile[index].empty())
@@ -2828,53 +2833,42 @@ void CreateAchievementsTab(UIState* state)
 #endif
 }
 
+// True when the controller is inside a section's options (not on the section list on the left).
+bool SettingsFocusInSection()
+{
+  for (ImGuiWindow* w = GImGui->NavWindow; w; w = w->ParentWindow)
+  {
+    if (std::strstr(w->Name, "##tabview"))
+      return true;
+  }
+  return false;
+}
+
 void DrawSettingsMenu(UIState* state, float frame_scale)
 {
+  static const std::pair<const char*, SelectedTab> sections[] = {
+      {"General", General},   {"Interface", Interface}, {"Graphics", Graphics},
+      {"Audio", Audio},       {"Controls", Controls},   {"GameCube", GC},
+      {"Wii", Wii},           {"Advanced", Advanced},   {"Paths", Paths},
+      {"Achievements", Achievements}, {"About", About}};
+
   if (ImGui::BeginListBox("##tabs", ImVec2(100 * frame_scale, -1)))
   {
-    if (ImGui::Selectable("General", state->selectedTab == General))
+    for (const auto& [name, tab] : sections)
     {
-      state->selectedTab = General;
-    }
-    if (ImGui::Selectable("Interface", state->selectedTab == Interface))
-    {
-      state->selectedTab = Interface;
-    }
-    if (ImGui::Selectable("Graphics", state->selectedTab == Graphics))
-    {
-      state->selectedTab = Graphics;
-    }
-    if (ImGui::Selectable("Audio", state->selectedTab == Audio))
-    {
-      state->selectedTab = Audio;
-    }
-    if (ImGui::Selectable("Controls", state->selectedTab == Controls))
-    {
-      state->selectedTab = Controls;
-    }
-    if (ImGui::Selectable("GameCube", state->selectedTab == GC))
-    {
-      state->selectedTab = GC;
-    }
-    if (ImGui::Selectable("Wii", state->selectedTab == Wii))
-    {
-      state->selectedTab = Wii;
-    }
-    if (ImGui::Selectable("Advanced", state->selectedTab == Advanced))
-    {
-      state->selectedTab = Advanced;
-    }
-    if (ImGui::Selectable("Paths", state->selectedTab == Paths))
-    {
-      state->selectedTab = Paths;
-    }
-    if (ImGui::Selectable("Achievements", state->selectedTab == Achievements))
-    {
-      state->selectedTab = Achievements;
-    }
-    if (ImGui::Selectable("About", state->selectedTab == About))
-    {
-      state->selectedTab = About;
+      const bool current = state->selectedTab == tab;
+      if (current && state->focusSectionList)
+      {
+        // B from inside a section: back to that section's name in the list
+        ImGui::SetKeyboardFocusHere();
+        state->focusSectionList = false;
+      }
+      if (ImGui::Selectable(name, current))
+      {
+        state->selectedTab = tab;
+        // A on a section: go straight into its options, no backing out first
+        state->focusSection = true;
+      }
     }
 
     ImGui::EndListBox();
@@ -2883,6 +2877,14 @@ void DrawSettingsMenu(UIState* state, float frame_scale)
   ImGui::SameLine();
   if (ImGui::BeginChild("##tabview", ImVec2(-1, -1), true))
   {
+    if (state->focusSection)
+    {
+      state->focusSection = false;
+      ImGuiWindow* section = ImGui::GetCurrentWindow();
+      ImGui::FocusWindow(section);
+      ImGui::NavInitWindow(section, true);  // highlight the first option in the section
+    }
+
     switch (state->selectedTab)
     {
     case General:

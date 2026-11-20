@@ -1064,6 +1064,7 @@ ImGuiFrontend::ImGuiFrontend()
   Pad::LoadConfig();
 
   PopulateControls();
+  AddEsDeGameFolders();
   BeginLoadGameListAsync();
   LoadThemes();
 
@@ -1423,6 +1424,7 @@ FrontendResult ImGuiFrontend::RunMainLoop()
     CoreWindow::GetForCurrentThread().Dispatcher().ProcessEvents(
         winrt::Windows::UI::Core::CoreProcessEventsOption::ProcessAllIfPresent);
 #endif
+    ApplyLoadedGames();
 
     if (!m_state.controlsDisabled)
       RefreshControls(!m_state.showSettingsWindow && !m_state.showPropertiesWindow);
@@ -1446,12 +1448,10 @@ FrontendResult ImGuiFrontend::RunMainLoop()
             {
               CloseMappingWindow();
               Config::Save();
+              // only rescan (in the background) if the game folders changed
+              ReloadGamesIfPathsChanged();
             }
             m_state.menuPressed = true;
-            LoadGameList();
-            FilterGamesForCategory();
-            if (m_selectedGameIdx >= m_displayed_games.size() || m_selectedGameIdx < 0)
-              m_selectedGameIdx = 0;
           }
 
           break;
@@ -1655,10 +1655,16 @@ FrontendResult ImGuiFrontend::RunMainLoop()
       {
         CloseMappingWindow();
       }
+      else if (m_state.showSettingsWindow && SettingsFocusInSection())
+      {
+        // inside a section: B goes back to the section list first
+        m_state.focusSectionList = true;
+      }
       else if (m_state.showSettingsWindow)
       {
         m_state.showSettingsWindow = false;
         Config::Save();
+        ReloadGamesIfPathsChanged();
       }
       else if (m_state.showPropertiesWindow)
       {
@@ -1962,10 +1968,6 @@ void ImGuiFrontend::GridActivateSide()
     default:  // settings
       m_state.showSettingsWindow = true;
       m_state.menuPressed = true;
-      LoadGameList();
-      FilterGamesForCategory();
-      if (m_selectedGameIdx >= static_cast<int>(m_displayed_games.size()) || m_selectedGameIdx < 0)
-        m_selectedGameIdx = 0;
       break;
     }
   }
@@ -2857,10 +2859,28 @@ ScanGamesCached(const std::vector<std::string>& game_paths, std::atomic<size_t>*
     s_game_cache->Load();
   }
 
+  // games already in the cache count as done straight away; new ones as they're read
+  if (progress)
+  {
+    std::unordered_set<std::string> known;
+    s_game_cache->ForEach([&known](const std::shared_ptr<const UICommon::GameFile>& game) {
+      known.insert(game->GetFilePath());
+    });
+    size_t done = 0;
+    for (const auto& path : game_paths)
+      done += known.count(path);
+    *progress = done;
+  }
+
   // adds new games, drops ones that are gone; known games aren't reopened. (No cover
   // downloads here: those happen in the background as the tiles are drawn.)
-  if (s_game_cache->Update(game_paths))
+  if (s_game_cache->Update(game_paths, [progress](const std::shared_ptr<const UICommon::GameFile>&) {
+        if (progress)
+          (*progress)++;
+      }))
+  {
     s_game_cache->Save();
+  }
 
   std::unordered_map<std::string, std::shared_ptr<UICommon::GameFile>> by_path;
   s_game_cache->ForEach([&by_path](const std::shared_ptr<const UICommon::GameFile>& game) {
@@ -2874,9 +2894,9 @@ ScanGamesCached(const std::vector<std::string>& game_paths, std::atomic<size_t>*
     auto it = by_path.find(path);
     if (it != by_path.end() && it->second && it->second->IsValid())
       games.emplace_back(it->second);
-    if (progress)
-      (*progress)++;
   }
+  if (progress)
+    *progress = game_paths.size();
   return games;
 }
 
@@ -3069,12 +3089,82 @@ void ImGuiFrontend::LoadGameList()
     m_selectedGameIdx = 0;
 }
 
+void ImGuiFrontend::ReloadGamesIfPathsChanged()
+{
+  if (Config::GetIsoPaths() != m_scanned_iso_paths ||
+      Config::Get(Config::MAIN_RECURSIVE_ISO_PATHS) != m_scanned_recursive)
+  {
+    BeginLoadGameListAsync();
+  }
+}
+
+void ImGuiFrontend::ApplyLoadedGames()
+{
+  if (!m_games_ready.exchange(false))
+    return;
+  {
+    std::lock_guard<std::mutex> lk(m_frontend_mutex);
+    m_paths = std::move(m_pending_paths);
+    m_games = std::move(m_pending_games);
+  }
+  FilterGamesForCategory();
+  if (m_selectedGameIdx >= m_displayed_games.size() || m_selectedGameIdx < 0)
+    m_selectedGameIdx = 0;
+  if (m_reload_again.exchange(false))
+    ReloadGamesIfPathsChanged();
+}
+
+void ImGuiFrontend::AddEsDeGameFolders()
+{
+#ifdef WINRT_XBOX
+  std::vector<std::string> paths = Config::GetIsoPaths();
+  auto have = [&paths](const std::string& dir) {
+    for (const auto& p : paths)
+    {
+      std::string a = p, b = dir;
+      std::replace(a.begin(), a.end(), '/', '\\');
+      while (!a.empty() && a.back() == '\\')
+        a.pop_back();
+      if (a.size() == b.size() &&
+          std::equal(a.begin(), a.end(), b.begin(),
+                     [](unsigned char x, unsigned char y) { return std::tolower(x) == std::tolower(y); }))
+        return true;
+    }
+    return false;
+  };
+  bool added = false;
+  for (char drive = 'C'; drive <= 'Z'; ++drive)
+  {
+    for (const char* sub : {"gc", "wii"})
+    {
+      const std::string dir = fmt::format("{}:\\ES-DE\\ROMs\\{}", drive, sub);
+      if (!have(dir) && File::IsDirectory(dir))
+      {
+        paths.push_back(dir);
+        added = true;
+      }
+    }
+  }
+  if (added)
+  {
+    Config::SetIsoPaths(paths);
+    Config::Save();
+  }
+#endif
+  m_paths = Config::GetIsoPaths();
+}
+
 void ImGuiFrontend::BeginLoadGameListAsync()
 {
   if (m_is_loading_games.load())
+  {
+    m_reload_again = true;  // folders changed during a scan: scan again when it's done
     return;
+  }
 
   m_is_loading_games = true;
+  m_scanned_iso_paths = Config::GetIsoPaths();
+  m_scanned_recursive = Config::Get(Config::MAIN_RECURSIVE_ISO_PATHS);
   m_loading_current = 0;
   m_loading_total = 0;
 
@@ -3099,19 +3189,13 @@ void ImGuiFrontend::BeginLoadGameListAsync()
     std::vector<std::shared_ptr<UICommon::GameFile>> temp_games =
         ScanGamesCached(all_game_paths, &m_loading_current);
 
-    // Commit results on the main data structures under lock
+    // hand the results to the menu thread, which puts them on screen between frames
     {
       std::lock_guard<std::mutex> lk(m_frontend_mutex);
-      m_paths = std::move(paths);
-      m_games = std::move(temp_games);
-      m_displayed_games.clear();
+      m_pending_paths = std::move(paths);
+      m_pending_games = std::move(temp_games);
     }
-
-    // Finalize list
-    FilterGamesForCategory();
-    if (m_selectedGameIdx >= m_displayed_games.size() || m_selectedGameIdx < 0)
-      m_selectedGameIdx = 0;
-
+    m_games_ready = true;
     m_is_loading_games = false;
   });
   m_loading_thread.detach();

@@ -77,6 +77,9 @@ public:
   bool menuPressed = false;
   std::string selectedPath;
   SelectedTab selectedTab = General;
+  // controller focus: jump into the picked section's options, or back to the section list
+  bool focusSection = false;
+  bool focusSectionList = false;
   ThemeBG currentBG = BG_All;
   CarouselCategory carouselCat = CAll;
   std::map<uint32_t, std::shared_ptr<AbstractTexture>> achievement_badges;
@@ -173,6 +176,12 @@ private:
 
   void LoadGameList();
   void BeginLoadGameListAsync();
+  // background rescan, only when the game folders (or "search subfolders") changed
+  void ReloadGamesIfPathsChanged();
+  // put a finished background scan on screen (runs on the menu thread, between frames)
+  void ApplyLoadedGames();
+  // add ES-DE\ROMs\gc and ES-DE\ROMs\wii from any drive that has them
+  void AddEsDeGameFolders();
   void DrawLoadingOverlay();
   void FilterGamesForCategory();
   void LoadThemes();
@@ -269,6 +278,12 @@ private:
   std::atomic<size_t> m_loading_current{0};
   std::atomic<size_t> m_loading_total{0};
   std::thread m_loading_thread;
+  std::atomic<bool> m_games_ready{false};
+  std::atomic<bool> m_reload_again{false};
+  std::vector<std::shared_ptr<UICommon::GameFile>> m_pending_games;
+  std::vector<std::string> m_pending_paths;
+  std::vector<std::string> m_scanned_iso_paths;
+  bool m_scanned_recursive = false;
 
 #ifdef USE_RETRO_ACHIEVEMENTS
   Config::ConfigChangedCallbackID m_config_changed_callback_id;
@@ -276,6 +291,7 @@ private:
 };
 
   void DrawSettingsMenu(UIState* state, float frame_scale);
+  bool SettingsFocusInSection();
   void DrawPropertiesDialog(UIState* state, float frame_scale);
   void CreatePropertiesInfoTab(UIState* state);
   void CreatePropertiesGameConfigTab(UIState* state);

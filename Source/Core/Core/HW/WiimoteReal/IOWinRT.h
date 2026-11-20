@@ -69,7 +69,7 @@ public:
   bool IsReady() const override;
   void FindWiimotes(std::vector<Wiimote*>&, Wiimote*&) override;
   void Update() override {}
-  void RequestStopSearching() override {}
+  void RequestStopSearching() override;
 };
 
 // One or more lines saying what the DolphinBar search saw last (shown in the Wii settings).

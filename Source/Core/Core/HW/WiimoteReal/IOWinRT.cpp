@@ -8,6 +8,9 @@
 // C++/WinRT's delegate wrappers for lambdas trip C4265 (warnings are errors here).
 #pragma warning(disable : 4265 4946)
 
+#include <cctype>
+#include <thread>
+#include <atomic>
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -53,6 +56,28 @@ constexpr auto PROBE_TIMEOUT = std::chrono::milliseconds(600);
 
 // An empty DolphinBar slot is still a HID device. Don't reopen it on every scan.
 constexpr auto EMPTY_SLOT_RETRY = std::chrono::seconds(3);
+// Look for the DolphinBar every few seconds, not every half second: each search asks the Xbox to
+// list devices, and doing that non-stop slowed the menus down.
+constexpr auto SEARCH_INTERVAL = std::chrono::seconds(3);
+constexpr auto DEVICE_LIST_INTERVAL = std::chrono::seconds(10);
+
+// Set when Dolphin stops looking (closing the menus, starting a game, quitting), so no wait
+// below holds that up.
+std::atomic<bool> s_stop{false};
+
+// Wait for a WinRT call to finish, but give up early when Dolphin stops looking.
+template <typename Op>
+bool WaitDone(const Op& op, std::chrono::milliseconds timeout)
+{
+  const auto end = std::chrono::steady_clock::now() + timeout;
+  while (op.Status() == AsyncStatus::Started)
+  {
+    if (s_stop || std::chrono::steady_clock::now() > end)
+      return false;
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  return op.Status() == AsyncStatus::Completed;
+}
 
 // What the scanner saw last time, shown under Wiimote Port 1 so we can tell why a remote
 // isn't connecting (no DolphinBar seen, the Xbox refused access, or no remote in a slot).
@@ -122,7 +147,7 @@ HID::HidDevice OpenDevice(const winrt::hstring& id)
                                           {
                                           }
                                         });
-      if (queued.wait_for(OPEN_TIMEOUT) == AsyncStatus::Completed)
+      if (WaitDone(queued, OPEN_TIMEOUT))
       {
         std::lock_guard lk(pending->mutex);
         op = pending->op;
@@ -139,7 +164,7 @@ HID::HidDevice OpenDevice(const winrt::hstring& id)
     if (!op)
       op = HID::HidDevice::FromIdAsync(id, FileAccessMode::ReadWrite);
 
-    if (op.wait_for(OPEN_TIMEOUT) != AsyncStatus::Completed)
+    if (!WaitDone(op, OPEN_TIMEOUT))
     {
       op.Cancel();
       s_open_error = "timed out";
@@ -257,8 +282,92 @@ std::unordered_map<std::string, std::chrono::steady_clock::time_point> s_empty_s
 
 WiimoteScannerWinRT::WiimoteScannerWinRT()
 {
+  s_stop = false;
   EnsureApartment();
 }
+
+void WiimoteScannerWinRT::RequestStopSearching()
+{
+  s_stop = true;
+}
+
+namespace
+{
+std::string s_device_list;
+
+std::string HexIds(const std::wstring& id)
+{
+  // "...VID_057E&PID_0306..." -> "057E:0306"
+  std::string s = WStringToUTF8(id);
+  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::toupper(c); });
+  const auto v = s.find("VID_");
+  const auto p = s.find("PID_");
+  if (v == std::string::npos || p == std::string::npos)
+    return "????:????";
+  return s.substr(v + 4, 4) + ":" + s.substr(p + 4, 4);
+}
+
+// Everything the Xbox lets Dolphin see: HID devices, USB devices and game controllers. Shown under
+// Wiimote Port 1 when the DolphinBar isn't found, so we can tell what the Xbox calls it.
+std::string ListVisibleDevices()
+{
+  std::string out;
+  int lines = 0;
+  auto add = [&](const std::string& line) {
+    if (lines++ < 14)
+      out += "\n" + line;
+  };
+
+  auto list = [&](const wchar_t* label, const wchar_t* guid) {
+    try
+    {
+      const std::wstring selector = std::wstring(L"System.Devices.InterfaceClassGuid:=\"") + guid +
+                                    L"\" AND System.Devices.InterfaceEnabled:=System."
+                                    L"StructuredQueryType.Boolean#True";
+      auto op = DeviceInformation::FindAllAsync(winrt::hstring(selector));
+      if (!WaitDone(op, OPEN_TIMEOUT))
+      {
+        op.Cancel();
+        add(WStringToUTF8(label) + ": search timed out");
+        return;
+      }
+      const auto found = op.GetResults();
+      if (found.Size() == 0)
+        add(WStringToUTF8(label) + ": none");
+      for (const auto& d : found)
+      {
+        add(fmt::format("{} {} {}", WStringToUTF8(label), HexIds(d.Id().c_str()),
+                        WStringToUTF8(d.Name().c_str())));
+      }
+    }
+    catch (const winrt::hresult_error& e)
+    {
+      add(fmt::format("{}: error {:08X}", WStringToUTF8(label), static_cast<u32>(e.code())));
+    }
+    catch (...)
+    {
+    }
+  };
+  list(L"HID", L"{4D1E55B2-F16F-11CF-88CB-001111000030}");
+  list(L"USB", L"{A5DCBF10-6530-11D2-901F-00C04FB951ED}");
+
+  try
+  {
+    for (const auto& pad : winrt::Windows::Gaming::Input::RawGameController::RawGameControllers())
+    {
+      add(fmt::format("Controller {:04X}:{:04X} {}", pad.HardwareVendorId(),
+                      pad.HardwareProductId(), WStringToUTF8(pad.DisplayName().c_str())));
+    }
+  }
+  catch (...)
+  {
+  }
+
+  if (lines > 14)
+    out += fmt::format("\n...and {} more", lines - 14);
+  return "\nDevices the Xbox shows Dolphin (Nintendo is 057E):" + out;
+}
+}  // namespace
 
 WiimoteScannerWinRT::~WiimoteScannerWinRT() = default;
 
@@ -272,6 +381,10 @@ void WiimoteScannerWinRT::FindWiimotes(std::vector<Wiimote*>& found_wiimotes, Wi
   EnsureApartment();
 
   const auto now = std::chrono::steady_clock::now();
+  static std::chrono::steady_clock::time_point s_last_search{};
+  if (now - s_last_search < SEARCH_INTERVAL)
+    return;
+  s_last_search = now;
   static int s_scans = 0;
   ++s_scans;
 
@@ -291,7 +404,7 @@ void WiimoteScannerWinRT::FindWiimotes(std::vector<Wiimote*>& found_wiimotes, Wi
         L" AND System.DeviceInterface.Hid.VendorId:=" +
         std::to_wstring(NINTENDO_VID);
     auto op = DeviceInformation::FindAllAsync(winrt::hstring(selector), props);
-    if (op.wait_for(OPEN_TIMEOUT) != AsyncStatus::Completed)
+    if (!WaitDone(op, OPEN_TIMEOUT))
     {
       op.Cancel();
       SetStatus(fmt::format("Dolphin Bar: search {} timed out.", s_scans));
@@ -376,19 +489,13 @@ void WiimoteScannerWinRT::FindWiimotes(std::vector<Wiimote*>& found_wiimotes, Wi
   if (slots == 0)
   {
     text = fmt::format("Dolphin Bar: not seen (search {}). Is it plugged in and on mode 4?", s_scans);
-    // Does the Xbox show it as a game controller instead?
-    try
+    static std::chrono::steady_clock::time_point s_last_list{};
+    if (s_device_list.empty() || now - s_last_list > DEVICE_LIST_INTERVAL)
     {
-      for (const auto& pad : winrt::Windows::Gaming::Input::RawGameController::RawGameControllers())
-      {
-        if (pad.HardwareVendorId() == NINTENDO_VID)
-          text += fmt::format("\nXbox lists it as a game controller ({:04X}:{:04X}).",
-                              pad.HardwareVendorId(), pad.HardwareProductId());
-      }
+      s_last_list = now;
+      s_device_list = ListVisibleDevices();
     }
-    catch (...)
-    {
-    }
+    text += s_device_list;
   }
   else
   {

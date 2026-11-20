@@ -179,11 +179,18 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
         g_shutdown_requested.Clear();
         g_tried_graceful_shutdown.Clear();
 
-        // Reinitialize UI systems (keep any changes made in-game first)
-        SaveAllSettings();
-        UICommon::Shutdown();
-        UICommon::Init();
-        UICommon::InitControllers({});
+        // Reinitialize UI systems (keep any changes made in-game first). Not on the very first
+        // pass: OnActivate has just loaded everything, and loading it all a second time made the
+        // splash screen take much longer.
+        static bool s_first_frontend = true;
+        if (!s_first_frontend)
+        {
+          SaveAllSettings();
+          UICommon::Shutdown();
+          UICommon::Init();
+          UICommon::InitControllers({});
+        }
+        s_first_frontend = false;
         StartRealWiimotesIfWanted();
 
         // Create and run new frontend
