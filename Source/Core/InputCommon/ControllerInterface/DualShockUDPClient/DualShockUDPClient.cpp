@@ -8,6 +8,7 @@
 #include <chrono>
 #include <tuple>
 
+#include <bit>
 #include <map>
 #include <mutex>
 #include <vector>
@@ -58,6 +59,8 @@ struct ServerStatus
   u64 refused = 0;
   bool bad_address = false;
   u32 pads = 0;
+  u32 rebuilds = 0;
+  u32 dropouts = 0;
   bool any_reply = false;
   bool any_data = false;
   SteadyClock::time_point last_reply{};
@@ -123,7 +126,11 @@ std::vector<std::string> GetServerStatusLines()
     else
     {
       line += fmt::format("WiimoteHook replied {} times (last {}). Controllers it has: {}.",
-                          st.replies, Ago(st.last_reply), st.pads);
+                          st.replies, Ago(st.last_reply), std::popcount(st.pads));
+      if (st.dropouts > 0)
+        line += fmt::format(" Connection dropped {} times.", st.dropouts);
+      if (st.rebuilds > 1)
+        line += fmt::format(" Controller re-added {} times.", st.rebuilds - 1);
       if (st.any_data)
         line += fmt::format(" Wii Remote data: last {}.", Ago(st.last_data));
       else if (st.pads > 0)
@@ -260,7 +267,9 @@ constexpr auto SERVER_LISTPORTS_INTERVAL = std::chrono::seconds{1};
 constexpr int TOUCH_X_AXIS_MAX = 1000;
 constexpr int TOUCH_Y_AXIS_MAX = 500;
 constexpr auto THREAD_MAX_WAIT_INTERVAL = std::chrono::milliseconds{250};
-constexpr auto SERVER_UNRESPONSIVE_INTERVAL = std::chrono::seconds{1};  // Can be 0
+// How long the server can stay quiet before its controllers are dropped. 1 second was too
+// short over Wi-Fi: a small hiccup disconnected the Wii Remote.
+constexpr auto SERVER_UNRESPONSIVE_INTERVAL = std::chrono::seconds{6};  // Can be 0
 constexpr u32 SERVER_ASKED_PADS = 4;
 
 struct Server
@@ -323,9 +332,10 @@ std::unique_ptr<ciface::InputBackend> CreateInputBackend(ControllerInterface* co
 static bool IsSameController(const Proto::MessageType::PortInfo& a,
                              const Proto::MessageType::PortInfo& b)
 {
-  // compare everything but battery_status
-  return std::tie(a.pad_id, a.pad_state, a.model, a.connection_type, a.pad_mac_address) ==
-         std::tie(b.pad_id, b.pad_state, b.model, b.connection_type, b.pad_mac_address);
+  // Only a controller arriving or leaving counts. Servers like WiimoteHook can report the model,
+  // connection type or address a little differently from one reply to the next; treating that as
+  // a new controller removed and re-added the Wii Remote over and over (connect/disconnect).
+  return std::tie(a.pad_id, a.pad_state) == std::tie(b.pad_id, b.pad_state);
 }
 
 void InputBackend::HotplugThreadFunc()
@@ -450,6 +460,10 @@ void InputBackend::HotplugThreadFunc()
                 !IsSameController(*port_info, server.m_port_info[port_info->pad_id]);
             if (port_changed)
             {
+              {
+                std::lock_guard lk(s_status_mutex);
+                StatusFor(server.m_address, server.m_port).rebuilds++;
+              }
               server.m_port_info[port_info->pad_id] = *port_info;
               // Just remove and re-add all the devices for simplicity
               GetControllerInterface().PlatformPopulateDevices([this] { PopulateDevices(); });
@@ -478,7 +492,13 @@ void InputBackend::HotplugThreadFunc()
         }
         // We can't only remove devices added by this server as we wouldn't know which they are
         if (any_connected)
+        {
+          {
+            std::lock_guard lk(s_status_mutex);
+            StatusFor(server.m_address, server.m_port).dropouts++;
+          }
           GetControllerInterface().PlatformPopulateDevices([this] { PopulateDevices(); });
+        }
       }
     }
   }
