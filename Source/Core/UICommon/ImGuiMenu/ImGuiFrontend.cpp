@@ -1046,6 +1046,7 @@ ImGuiFrontend::ImGuiFrontend()
   m_wiimote_profiles.emplace_back("Classic Controller");
   m_wiimote_profiles.emplace_back("Sideways Wiimote");
   m_wiimote_profiles.emplace_back("Real Wii Remote (DolphinBar)");
+  m_wiimote_profiles.emplace_back("Wii Remote over network (WiimoteHook)");
 
   profiles_path =
       File::GetUserPath(D_CONFIG_IDX) + PROFILES_DIR + Pad::GetConfig()->GetProfileDirectoryName();

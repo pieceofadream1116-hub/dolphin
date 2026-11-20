@@ -79,6 +79,7 @@ extern std::vector<std::string> m_wiimote_profiles;
 extern std::string m_selected_wiimote_profile[4];
 
 static std::vector<std::string> m_gc_profiles;
+constexpr const char* WIIMOTEHOOK_PROFILE = "Wii Remote over network (WiimoteHook)";
 static std::array<std::string, 4> m_selected_gc_profile = {"None", "None", "None", "None"};
 
 static void EnsureGCProfilesLoaded()
@@ -1123,10 +1124,24 @@ void CreateAudioTab(UIState* state)
 #endif
 }
 
-void CreateGCPort(int index, std::vector<std::string> devices)
+// a big, easy-to-see button inside each port's box (it used to be a tiny "Map" in the corner)
+static bool RemapButton(const char* id)
 {
-  if (ImGui::BeginChild(fmt::format("gc-port-{}", index).c_str(), ImVec2(-1, 75 * m_frame_scale),
-                        true))
+  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.10f, 0.22f, 1.0f));
+  ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 0.78f, 0.25f, 1.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.0f);
+  const bool pressed = ImGui::Button(fmt::format("Remap buttons##{}", id).c_str(),
+                                     ImVec2(-1, ImGui::GetFrameHeight() * 1.6f));
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor(2);
+  return pressed;
+}
+
+void CreateGCPort(int index, std::vector<std::string> devices, UIState* state)
+{
+  if (ImGui::BeginChild(fmt::format("gc-port-{}", index).c_str(), ImVec2(-1, 0),
+                        ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY |
+                            ImGuiChildFlags_NavFlattened))
   {
     auto controller = Pad::GetConfig()->GetController(index);
     auto default_device = controller->GetDefaultDevice().name;
@@ -1191,22 +1206,27 @@ void CreateGCPort(int index, std::vector<std::string> devices)
 
       ImGui::EndCombo();
     }
+
+    if (RemapButton(fmt::format("gc{}", index).c_str()))
+    {
+      state->showMappingWindow = true;
+      state->mappingWindowPort = index;
+      state->mappingWindowIsWii = false;
+    }
   }
 
   ImGui::EndChild();
 }
 
-void CreateWiiPort(int index, std::vector<std::string> devices)
+void CreateWiiPort(int index, std::vector<std::string> devices, UIState* state)
 {
   const bool is_real =
       Config::Get(Config::GetInfoForWiimoteSource(index)) == WiimoteSource::Real;
   const std::string bar_status = is_real ? WiimoteReal::GetWinRTWiimoteStatus() : std::string();
   // the box grows to fit the Dolphin Bar status, however many lines it has
-  const ImGuiChildFlags child_flags =
-      bar_status.empty() ? ImGuiChildFlags_Borders :
-                           (ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
-  if (ImGui::BeginChild(fmt::format("gc-wii-{}", index).c_str(),
-                        ImVec2(-1, bar_status.empty() ? 75 * m_frame_scale : 0), child_flags))
+  if (ImGui::BeginChild(fmt::format("gc-wii-{}", index).c_str(), ImVec2(-1, 0),
+                        ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY |
+                            ImGuiChildFlags_NavFlattened))
   {
     auto controller = Wiimote::GetConfig()->GetController(index);
     auto default_device = controller->GetDefaultDevice().name;
@@ -1281,6 +1301,25 @@ void CreateWiiPort(int index, std::vector<std::string> devices)
             Config::SetBaseOrCurrent(Config::MAIN_BLUETOOTH_PASSTHROUGH_ENABLED, false);
             WiimoteReal::Initialize(::Wiimote::InitializeMode::DO_NOT_WAIT_FOR_WIIMOTES);
           }
+          else if (m_selected_wiimote_profile[index] == WIIMOTEHOOK_PROFILE)
+          {
+            // A real Wii Remote sent over the network by WiimoteHook on a PC (Alternate Input
+            // Sources > DSU): every button, the D-pad, shake, motion and the Nunchuk ready-mapped.
+            Common::IniFile ini;
+            ini.Load(File::GetSysDirectory() + PROFILES_DIR +
+                     Wiimote::GetConfig()->GetProfileDirectoryName() + "/WiimoteHook.ini");
+            controller->LoadConfig(ini.GetOrCreateSection("Profile"));
+            for (const auto& device : devices)
+            {
+              if (device.starts_with("DSUClient/"))
+              {
+                controller->SetDefaultDevice(device);
+                break;
+              }
+            }
+            Config::SetBaseOrCurrent(Config::GetInfoForWiimoteSource(index),
+                                     WiimoteSource::Emulated);
+          }
           else if (m_selected_wiimote_profile[index] == "Sideways Wiimote")
           {
             Common::IniFile ini;
@@ -1310,6 +1349,13 @@ void CreateWiiPort(int index, std::vector<std::string> devices)
 
       ImGui::EndCombo();
     }
+
+    if (RemapButton(fmt::format("wii{}", index).c_str()))
+    {
+      state->showMappingWindow = true;
+      state->mappingWindowPort = index;
+      state->mappingWindowIsWii = true;
+    }
   }
 
   ImGui::EndChild();
@@ -1324,51 +1370,15 @@ void CreateControlsTab(UIState* state)
   {
     if (ImGui::BeginTabItem("GameCube"))
     {
-      if (ImGui::BeginTable("gc_ports_tbl", 2, ImGuiTableFlags_SizingStretchProp))
-      {
-        ImGui::TableSetupColumn("Port", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Map", ImGuiTableColumnFlags_WidthFixed, 80);
-        ImGui::TableHeadersRow();
-        for (int i = 0; i < 4; i++)
-        {
-          ImGui::TableNextRow();
-          ImGui::TableNextColumn();
-          CreateGCPort(i, devices);
-          ImGui::TableNextColumn();
-          if (ImGui::Button(fmt::format("Map##gc{}", i).c_str(), ImVec2(-1, 0)))
-          {
-            state->showMappingWindow = true;
-            state->mappingWindowPort = i;
-            state->mappingWindowIsWii = false;
-          }
-        }
-        ImGui::EndTable();
-      }
+      for (int i = 0; i < 4; i++)
+        CreateGCPort(i, devices, state);
       ImGui::EndTabItem();
     }
 
     if (ImGui::BeginTabItem("Wii"))
     {
-      if (ImGui::BeginTable("wii_ports_tbl", 2, ImGuiTableFlags_SizingStretchProp))
-      {
-        ImGui::TableSetupColumn("Port", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Map", ImGuiTableColumnFlags_WidthFixed, 80);
-        ImGui::TableHeadersRow();
-        for (int i = 0; i < 4; i++)
-        {
-          ImGui::TableNextRow();
-          ImGui::TableNextColumn();
-          CreateWiiPort(i, devices);
-          ImGui::TableNextColumn();
-          if (ImGui::Button(fmt::format("Map##wii{}", i).c_str(), ImVec2(-1, 0)))
-          {
-            state->showMappingWindow = true;
-            state->mappingWindowPort = i;
-            state->mappingWindowIsWii = true;
-          }
-        }
-        ImGui::EndTable();
-      }
+      for (int i = 0; i < 4; i++)
+        CreateWiiPort(i, devices, state);
       ImGui::EndTabItem();
     }
 
@@ -2842,14 +2852,16 @@ void CreateAchievementsTab(UIState* state)
 }
 
 // True when the controller is inside a section's options (not on the section list on the left).
+static float s_section_list_right = 0.0f;  // right edge of the section list, in screen space
+
+// True when the controller is on a section's options (to the right of the section list).
 bool SettingsFocusInSection()
 {
-  for (ImGuiWindow* w = GImGui->NavWindow; w; w = w->ParentWindow)
-  {
-    if (std::strstr(w->Name, "##tabview"))
-      return true;
-  }
-  return false;
+  ImGuiContext& g = *GImGui;
+  if (!g.NavWindow || g.NavId == 0)
+    return false;
+  const ImRect r = ImGui::WindowRectRelToAbs(g.NavWindow, g.NavWindow->NavRectRel[ImGuiNavLayer_Main]);
+  return r.Min.x > s_section_list_right;
 }
 
 void DrawSettingsMenu(UIState* state, float frame_scale)
@@ -2860,7 +2872,10 @@ void DrawSettingsMenu(UIState* state, float frame_scale)
       {"Wii", Wii},           {"Advanced", Advanced},   {"Paths", Paths},
       {"Achievements", Achievements}, {"About", About}};
 
-  if (ImGui::BeginListBox("##tabs", ImVec2(100 * frame_scale, -1)))
+  // The section list and the section's options are one connected menu (NavFlattened): the D-pad
+  // moves straight from a section name into its options and back, no backing out first.
+  if (ImGui::BeginChild("##tabs", ImVec2(100 * frame_scale, -1),
+                        ImGuiChildFlags_Borders | ImGuiChildFlags_NavFlattened))
   {
     for (const auto& [name, tab] : sections)
     {
@@ -2878,21 +2893,23 @@ void DrawSettingsMenu(UIState* state, float frame_scale)
         state->focusSection = true;
       }
     }
+  }
+  s_section_list_right = ImGui::GetWindowPos().x + ImGui::GetWindowSize().x;
+  ImGui::EndChild();
 
-    ImGui::EndListBox();
+  if (state->focusSection)
+  {
+    // same as pressing Right: the nearest option in the section gets the controller
+    state->focusSection = false;
+    if (GImGui->NavWindow)
+      ImGui::NavMoveRequestSubmit(ImGuiDir_Right, ImGuiDir_Right, ImGuiNavMoveFlags_None,
+                                ImGuiScrollFlags_None);
   }
 
   ImGui::SameLine();
-  if (ImGui::BeginChild("##tabview", ImVec2(-1, -1), true))
+  if (ImGui::BeginChild("##tabview", ImVec2(-1, -1),
+                        ImGuiChildFlags_Borders | ImGuiChildFlags_NavFlattened))
   {
-    if (state->focusSection)
-    {
-      state->focusSection = false;
-      ImGuiWindow* section = ImGui::GetCurrentWindow();
-      ImGui::FocusWindow(section);
-      ImGui::NavInitWindow(section, true);  // highlight the first option in the section
-    }
-
     switch (state->selectedTab)
     {
     case General:

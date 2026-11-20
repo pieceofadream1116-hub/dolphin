@@ -1,4 +1,5 @@
 #include "ImGuiMappingWindow.h"
+#include <algorithm>
 #include <chrono>
 #include <format>
 #include <functional>
@@ -29,6 +30,9 @@
 namespace ImGuiFrontend
 {
 static std::vector<std::function<void()>> s_pendingBinds;
+// which button is being captured, and since when (so each capture gets its own 15 seconds)
+static ::ControlReference* s_capture_ref = nullptr;
+static std::chrono::steady_clock::time_point s_capture_since;
 
 void ImGuiMappingWindow::Draw(int port, UIState* state)
 {
@@ -55,26 +59,55 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
 
   InputConfig* config = state->mappingWindowIsWii ? Wiimote::GetConfig() : Pad::GetConfig();
   ControllerEmu::EmulatedController* controller = config->GetController(port);
+  if (!state->capturingRef)
+    s_capture_ref = nullptr;
   if (state->capturingRef)
   {
-    ImGui::Text("Press any button/input to bind '%s'...",
-                state->capturingRef->GetExpression().c_str());
+    // Capturing a button. Wait a moment first so the press that opened this box is ignored,
+    // then listen ONLY to this port's own device for up to 15 seconds: plenty of time to put
+    // one controller down and pick up the other.
+    using Clock = std::chrono::steady_clock;
+    constexpr auto GRACE = std::chrono::milliseconds(700);
+    constexpr auto LISTEN = std::chrono::seconds(15);
+
+    if (s_capture_ref != state->capturingRef)
+    {
+      s_capture_ref = state->capturingRef;
+      s_capture_since = Clock::now();
+      state->mappingInputDetector.reset();
+    }
+
+    const auto& def = controller->GetDefaultDevice();
+    const std::string device_name = def.ToString();
+    const auto waited = Clock::now() - s_capture_since;
+
+    if (waited < GRACE)
+    {
+      ImGui::Text("Get ready...");
+      ImGui::TextUnformatted(("Listening to: " + device_name).c_str());
+      ImGui::End();
+      return;
+    }
+
     if (!state->mappingInputDetector)
     {
       state->mappingInputDetector = std::make_unique<ciface::Core::InputDetector>();
-      const auto& def = controller->GetDefaultDevice();
-      std::vector<std::string> devices{def.ToString()};
+      std::vector<std::string> devices{device_name};
       state->mappingInputDetector->Start(g_controller_interface, devices);
     }
-    state->mappingInputDetector->Update(std::chrono::milliseconds(300),
-                                        std::chrono::milliseconds(300), std::chrono::seconds(5));
+
+    const auto left = std::chrono::duration_cast<std::chrono::seconds>(LISTEN - (waited - GRACE));
+    ImGui::Text("Press the button now (%d seconds left)", static_cast<int>(std::max<long long>(0, left.count())));
+    ImGui::TextUnformatted(("Listening only to: " + device_name).c_str());
+
+    state->mappingInputDetector->Update(LISTEN, std::chrono::milliseconds(300), LISTEN);
     if (state->mappingInputDetector->IsComplete())
     {
       auto results = state->mappingInputDetector->TakeResults();
       ciface::MappingCommon::RemoveSpuriousTriggerCombinations(&results);
       if (!results.empty())
       {
-        auto expr = ciface::MappingCommon::BuildExpression(results, controller->GetDefaultDevice(),
+        auto expr = ciface::MappingCommon::BuildExpression(results, def,
                                                            ciface::MappingCommon::Quote::On);
         auto* ref = state->capturingRef;
         auto* ctrl = controller;
@@ -82,14 +115,10 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
           ref->SetExpression(expr);
           ctrl->UpdateSingleControlReference(g_controller_interface, ref);
         });
-        state->capturingRef = nullptr;
-        state->mappingInputDetector.reset();
-        ImGui::End();
-        return;
       }
-      // nothing was pressed in time: stop waiting (before, it waited forever and the menus
-      // stayed locked)
+      // done, or nothing pressed in 15 seconds: stop waiting so the menus never stay locked
       state->capturingRef = nullptr;
+      s_capture_ref = nullptr;
       state->mappingInputDetector.reset();
     }
     ImGui::End();

@@ -322,8 +322,8 @@ private:
   extern std::map<std::string, FrontendTheme> m_themes;
   extern FrontendTheme* m_selected_theme;
   void DrawAchievementsWindow(UIState* state);
-  void CreateWiiPort(int index, std::vector<std::string> devices);
-  void CreateGCPort(int index, std::vector<std::string> devices);
+  void CreateWiiPort(int index, std::vector<std::string> devices, UIState* state);
+  void CreateGCPort(int index, std::vector<std::string> devices, UIState* state);
 
 std::shared_ptr<AbstractTexture> CreateTextureFromPath(std::string path,
                                                        bool is_theme_asset = false);
