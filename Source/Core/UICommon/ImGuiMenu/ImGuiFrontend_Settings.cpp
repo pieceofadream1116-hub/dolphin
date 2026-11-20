@@ -1335,13 +1335,20 @@ void CreateWiiPort(int index, std::vector<std::string> devices, UIState* state)
             ini.Load(File::GetSysDirectory() + PROFILES_DIR +
                      Wiimote::GetConfig()->GetProfileDirectoryName() + "/WiimoteHook.ini");
             controller->LoadConfig(ini.GetOrCreateSection("Profile"));
+            // Port 1 gets the first Wii Remote WiimoteHook sends, port 2 the second, and so on
+            // (falls back to the first one if there aren't that many yet).
+            std::vector<std::string> dsu_devices;
             for (const auto& device : devices)
             {
               if (device.starts_with("DSUClient/"))
-              {
-                controller->SetDefaultDevice(device);
-                break;
-              }
+                dsu_devices.push_back(device);
+            }
+            if (!dsu_devices.empty())
+            {
+              const size_t pick = static_cast<size_t>(index) < dsu_devices.size() ?
+                                      static_cast<size_t>(index) :
+                                      0;
+              controller->SetDefaultDevice(dsu_devices[pick]);
             }
             Config::SetBaseOrCurrent(Config::GetInfoForWiimoteSource(index),
                                      WiimoteSource::Emulated);
