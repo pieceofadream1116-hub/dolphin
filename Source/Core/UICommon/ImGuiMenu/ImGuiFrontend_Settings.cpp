@@ -446,7 +446,8 @@ void CreateGraphicsTab(UIState* state)
       Config::Save();
     }
 
-    const char* shader_items[] = {"Synchronous", "Hybrid Ubershaders", "Exclusive Ubershaders",
+    // same order as ShaderCompilationMode (the two ubershader names were swapped before)
+    const char* shader_items[] = {"Synchronous", "Exclusive Ubershaders", "Hybrid Ubershaders",
                                   "Skip Drawing"};
         int shader_idx = 0;
         auto shader = Config::Get(Config::GFX_SHADER_COMPILATION_MODE);
@@ -1137,11 +1138,38 @@ static bool RemapButton(const char* id)
   return pressed;
 }
 
+// A port's box: a plain group with a border drawn around it. (It used to be a child window, and
+// the D-pad couldn't move from the tabs into it.)
+static float s_port_box_right = 0.0f;
+
+static void PortBoxBegin(const std::string& id)
+{
+  s_port_box_right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+  ImGui::PushID(id.c_str());
+  ImGui::BeginGroup();
+  const float pad = ImGui::GetStyle().FramePadding.x * 2.0f;
+  ImGui::Dummy(ImVec2(0, pad * 0.5f));
+  ImGui::Indent(pad);
+}
+
+static void PortBoxEnd()
+{
+  const float pad = ImGui::GetStyle().FramePadding.x * 2.0f;
+  ImGui::Unindent(pad);
+  ImGui::Dummy(ImVec2(0, pad * 0.5f));
+  ImGui::EndGroup();
+  ImVec2 min = ImGui::GetItemRectMin();
+  ImVec2 max = ImGui::GetItemRectMax();
+  max.x = std::max(max.x, s_port_box_right);
+  ImGui::GetWindowDrawList()->AddRect(min, max, ImGui::GetColorU32(ImGuiCol_Border),
+                                      ImGui::GetStyle().ChildRounding, 0, 2.0f);
+  ImGui::PopID();
+  ImGui::Spacing();
+}
+
 void CreateGCPort(int index, std::vector<std::string> devices, UIState* state)
 {
-  if (ImGui::BeginChild(fmt::format("gc-port-{}", index).c_str(), ImVec2(-1, 0),
-                        ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY |
-                            ImGuiChildFlags_NavFlattened))
+  PortBoxBegin(fmt::format("gc-port-{}", index));
   {
     auto controller = Pad::GetConfig()->GetController(index);
     auto default_device = controller->GetDefaultDevice().name;
@@ -1215,7 +1243,7 @@ void CreateGCPort(int index, std::vector<std::string> devices, UIState* state)
     }
   }
 
-  ImGui::EndChild();
+  PortBoxEnd();
 }
 
 void CreateWiiPort(int index, std::vector<std::string> devices, UIState* state)
@@ -1224,9 +1252,7 @@ void CreateWiiPort(int index, std::vector<std::string> devices, UIState* state)
       Config::Get(Config::GetInfoForWiimoteSource(index)) == WiimoteSource::Real;
   const std::string bar_status = is_real ? WiimoteReal::GetWinRTWiimoteStatus() : std::string();
   // the box grows to fit the Dolphin Bar status, however many lines it has
-  if (ImGui::BeginChild(fmt::format("gc-wii-{}", index).c_str(), ImVec2(-1, 0),
-                        ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY |
-                            ImGuiChildFlags_NavFlattened))
+  PortBoxBegin(fmt::format("gc-wii-{}", index));
   {
     auto controller = Wiimote::GetConfig()->GetController(index);
     auto default_device = controller->GetDefaultDevice().name;
@@ -1358,7 +1384,7 @@ void CreateWiiPort(int index, std::vector<std::string> devices, UIState* state)
     }
   }
 
-  ImGui::EndChild();
+  PortBoxEnd();
 }
 
 void CreateControlsTab(UIState* state)

@@ -5,11 +5,13 @@
 #include <functional>
 #include <imgui.h>
 #include <string>
+#include <string_view>
 #include <vector>
 #include "Core/HW/GCPad.h"
 #include "Core/HW/Wiimote.h"
 #include "Core/HW/WiimoteEmu/WiimoteEmu.h"
 #include "InputCommon/ControllerEmu/ControlGroup/Attachments.h"
+#include "InputCommon/ControllerEmu/Setting/NumericSetting.h"
 #include "InputCommon/ControllerEmu/ControlGroup/Buttons.h"
 #include "InputCommon/ControllerEmu/ControllerEmu.h"
 #include "InputCommon/ControllerInterface/ControllerInterface.h"
@@ -147,6 +149,30 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
   ImGui::TextDisabled("B or Menu: save and close");
   ImGui::Spacing();
 
+  // The real Extension group (its ui name is "Extension"; looking it up as "Attachments" found
+  // nothing, so the MotionPlus box and extension list did nothing and the Extension tab was empty).
+  ControllerEmu::Attachments* attachments = nullptr;
+  ControllerEmu::NumericSetting<bool>* motion_plus = nullptr;
+  if (state->mappingWindowIsWii)
+  {
+    for (auto& gp : controller->groups)
+    {
+      if (gp->type != ControllerEmu::GroupType::Attachments)
+        continue;
+      attachments = static_cast<ControllerEmu::Attachments*>(gp.get());
+      for (auto& ns : gp->numeric_settings)
+      {
+        if (std::string_view(ns->GetININame()) == "Attach MotionPlus")
+          motion_plus = static_cast<ControllerEmu::NumericSetting<bool>*>(ns.get());
+      }
+    }
+    // show what's really set (e.g. by a profile), not a stale guess
+    if (attachments)
+      state->wiimote_extension = static_cast<int>(attachments->GetSelectedAttachment());
+    if (motion_plus)
+      state->wiimote_motionplus = motion_plus->GetValue();
+  }
+
   if (ImGui::BeginTabBar("MappingTabs"))
   {
     if (state->mappingWindowIsWii)
@@ -198,9 +224,11 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
         {
           if (ImGui::Checkbox("MotionPlus##WiiMap", &state->wiimote_motionplus))
           {
-            if (auto* attachGroup =
-                    static_cast<ControllerEmu::Attachments*>(findGroup("Attachments")))
-              attachGroup->GetSelectionSetting().SetValue(state->wiimote_motionplus ? 1 : 0);
+            if (motion_plus)
+            {
+              motion_plus->SetValue(state->wiimote_motionplus);
+              motion_plus->SetExpressionFromValue();
+            }
             config->SaveConfig();
           }
           static const char* ext_names[] = {
@@ -209,9 +237,8 @@ void ImGuiMappingWindow::Draw(int port, UIState* state)
           if (ImGui::Combo("Attached Extension##AttachedExt", &state->wiimote_extension, ext_names,
                            IM_ARRAYSIZE(ext_names)))
           {
-            if (auto* attachGroup =
-                    static_cast<ControllerEmu::Attachments*>(findGroup("Attachments")))
-              attachGroup->SetSelectedAttachment(state->wiimote_extension);
+            if (attachments)
+              attachments->SetSelectedAttachment(state->wiimote_extension);
             config->SaveConfig();
           }
           ImGui::Separator();
