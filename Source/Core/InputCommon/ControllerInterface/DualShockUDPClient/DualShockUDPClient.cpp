@@ -38,10 +38,12 @@ namespace Settings
 const Config::Info<std::string> SERVER_ADDRESS{
     {Config::System::DualShockUDPClient, "Server", "IPAddress"}, ""};
 const Config::Info<int> SERVER_PORT{{Config::System::DualShockUDPClient, "Server", "Port"}, 0};
+// Frank's PC running WiimoteHook, ready-made so it doesn't have to be typed in after every install
+constexpr const char* WIIMOTEHOOK_PC = "WiimoteHook PC:192.168.1.12:26760;";
 const Config::Info<std::string> SERVERS{{Config::System::DualShockUDPClient, "Server", "Entries"},
-                                        ""};
+                                        WIIMOTEHOOK_PC};
 const Config::Info<bool> SERVERS_ENABLED{{Config::System::DualShockUDPClient, "Server", "Enabled"},
-                                         false};
+                                         true};
 }  // namespace Settings
 
 // Clock type used for querying timeframes
@@ -640,6 +642,13 @@ InputBackend::InputBackend(ControllerInterface* controller_interface)
                                                            server_port_setting));
     Config::SetBase(Settings::SERVER_ADDRESS, "");
     Config::SetBase(Settings::SERVER_PORT, 0);
+  }
+
+  // No server saved at all: add the WiimoteHook PC and turn DSU on.
+  if (Config::Get(Settings::SERVERS).find(':') == std::string::npos)
+  {
+    Config::SetBaseOrCurrent(Settings::SERVERS, std::string(Settings::WIIMOTEHOOK_PC));
+    Config::SetBaseOrCurrent(Settings::SERVERS_ENABLED, true);
   }
 
   m_config_change_callback_id =
