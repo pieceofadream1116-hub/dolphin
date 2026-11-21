@@ -2014,7 +2014,7 @@ void CreateWiiTab(UIState* state)
   if (ImGui::BeginPopupModal("Online System Update", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
   {
     ImGui::Text("Select Region:");
-    static int region_idx = 0;
+    static int region_idx = 1;  // USA first: Frank's console region
     const char* region_items[] = {"JPN", "USA", "EUR", "KOR"};
     ImGui::Combo("Region", &region_idx, region_items, IM_ARRAYSIZE(region_items));
     if (ImGui::Button("OK"))

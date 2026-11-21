@@ -3130,6 +3130,49 @@ void ImGuiFrontend::AddEsDeGameFolders()
       Config::Save();
     }
   }
+
+  // GameCube startup screen: copy IPL.bin from the drive (e.g. D:\GAMECUBE\BIOS\USA\IPL.bin)
+  // into Dolphin's own GC folder, where every part of Dolphin already looks for it.
+  {
+    bool copied_any = false;
+    for (const char* region : {"USA", "EUR", "JAP"})
+    {
+      const std::string dest_dir = File::GetUserPath(D_GCUSER_IDX) + region;
+      const std::string dest = dest_dir + "/" GC_IPL;
+      if (File::Exists(dest))
+        continue;
+      std::vector<std::string> candidates;
+      for (char drive = 'D'; drive <= 'Z'; ++drive)
+      {
+        for (const char* base : {"GAMECUBE/BIOS", "GAMECUBE/bios", "GAMECUBE", "Dolphin/GC",
+                                 "Dolphin/BIOS", "BIOS/GameCube", "BIOS/GC"})
+        {
+          candidates.push_back(fmt::format("{}:/{}/{}/{}", drive, base, region, GC_IPL));
+          // a single IPL.bin with no region folder counts as USA
+          if (std::string_view(region) == "USA")
+            candidates.push_back(fmt::format("{}:/{}/{}", drive, base, GC_IPL));
+        }
+      }
+      for (const std::string& src : candidates)
+      {
+        if (!File::Exists(src))
+          continue;
+        File::CreateFullPath(dest_dir + "/");
+        if (File::CopyRegularFile(src, dest))
+        {
+          INFO_LOG_FMT(BOOT, "GameCube IPL copied from {} to {}", src, dest);
+          copied_any = true;
+        }
+        break;
+      }
+    }
+    if (copied_any)
+    {
+      // first time it's there: play the GameCube startup screen before games
+      Config::SetBase(Config::MAIN_SKIP_IPL, false);
+      Config::Save();
+    }
+  }
   std::vector<std::string> paths = Config::GetIsoPaths();
   auto have = [&paths](const std::string& dir) {
     for (const auto& p : paths)
