@@ -218,6 +218,9 @@ std::vector<std::string> GetDriveTextureRoots()
       "Dolphin/textures",         "Dolphin/Load/Textures", "NINTENDO/texture pack",
       "NINTENDO/texture packs",   "texture pack",          "texture packs",
       "Dolphin Emulator/Load/Textures",
+      "GAMECUBE/texture packets", "GAMECUBE/texture packs", "GAMECUBE/texture pack",
+      "GAMECUBE/textures",        "WII/texture packets",    "WII/texture packs",
+      "WII/texture pack",         "WII/textures",
   };
   std::vector<std::string> roots;
   for (char drive = 'D'; drive <= 'Z'; ++drive)
