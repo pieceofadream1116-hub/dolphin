@@ -90,8 +90,17 @@ void HiresTexture::Update()
   }
 
   const std::string& game_id = SConfig::GetInstance().GetGameID();
-  const std::set<std::string> texture_directories =
+  std::set<std::string> texture_directories =
       GetTextureDirectoriesWithGameId(File::GetUserPath(D_HIRESTEXTURES_IDX), game_id);
+#ifdef WINRT_XBOX
+  // Xbox: also use packs kept on an external drive, e.g. D:\Dolphin\texture pack\<game ID>
+  for (const std::string& root : GetDriveTextureRoots())
+  {
+    const auto found = GetTextureDirectoriesWithGameId(root, game_id);
+    texture_directories.insert(found.begin(), found.end());
+  }
+  INFO_LOG_FMT(VIDEO, "Texture packs for {}: {} folder(s)", game_id, texture_directories.size());
+#endif
   const std::vector<std::string> extensions{".png", ".dds"};
 
   for (const auto& texture_directory : texture_directories)
@@ -197,6 +206,32 @@ VideoCommon::CustomResourceManager::TextureTimePair HiresTexture::LoadTexture() 
   auto& custom_resource_manager = system.GetCustomResourceManager();
   return custom_resource_manager.GetTextureDataFromAsset(m_id, s_file_library);
 }
+
+#ifdef WINRT_XBOX
+// Texture-pack folders on the Xbox's drives. Every match is used, so packs can be split
+// across folders. Each game's pack sits inside as a folder named after its game ID
+// (GM4E01, or the 3-letter GM4), or any folder holding a <game ID>.txt file.
+std::vector<std::string> GetDriveTextureRoots()
+{
+  static const char* const names[] = {
+      "Dolphin/texture pack",     "Dolphin/texture packs", "Dolphin/texture packets",
+      "Dolphin/textures",         "Dolphin/Load/Textures", "NINTENDO/texture pack",
+      "NINTENDO/texture packs",   "texture pack",          "texture packs",
+      "Dolphin Emulator/Load/Textures",
+  };
+  std::vector<std::string> roots;
+  for (char drive = 'D'; drive <= 'Z'; ++drive)
+  {
+    for (const char* name : names)
+    {
+      const std::string dir = fmt::format("{}:/{}", drive, name);
+      if (File::IsDirectory(dir))
+        roots.push_back(dir + DIR_SEP);
+    }
+  }
+  return roots;
+}
+#endif
 
 std::set<std::string> GetTextureDirectoriesWithGameId(const std::string& root_directory,
                                                       const std::string& game_id)

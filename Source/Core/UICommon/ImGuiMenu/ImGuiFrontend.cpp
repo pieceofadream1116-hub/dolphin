@@ -3118,6 +3118,18 @@ void ImGuiFrontend::ApplyLoadedGames()
 void ImGuiFrontend::AddEsDeGameFolders()
 {
 #ifdef WINRT_XBOX
+  // One time only: switch "Load Custom Textures" on for settings saved by older builds.
+  // After this, the Graphics menu switch is left alone.
+  {
+    static const Config::Info<bool> TEXTURE_PACKS_ON{{Config::System::GFX, "Xbox", "TexturePacksOn"},
+                                                     false};
+    if (!Config::Get(TEXTURE_PACKS_ON))
+    {
+      Config::SetBase(Config::GFX_HIRES_TEXTURES, true);
+      Config::SetBase(TEXTURE_PACKS_ON, true);
+      Config::Save();
+    }
+  }
   std::vector<std::string> paths = Config::GetIsoPaths();
   auto have = [&paths](const std::string& dir) {
     for (const auto& p : paths)

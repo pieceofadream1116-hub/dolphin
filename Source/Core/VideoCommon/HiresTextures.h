@@ -18,6 +18,9 @@ enum class TextureFormat;
 
 std::set<std::string> GetTextureDirectoriesWithGameId(const std::string& root_directory,
                                                       const std::string& game_id);
+#ifdef WINRT_XBOX
+std::vector<std::string> GetDriveTextureRoots();
+#endif
 
 class HiresTexture
 {
