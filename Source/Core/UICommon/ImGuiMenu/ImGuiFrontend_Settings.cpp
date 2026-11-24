@@ -1335,21 +1335,22 @@ void CreateWiiPort(int index, std::vector<std::string> devices, UIState* state)
             ini.Load(File::GetSysDirectory() + PROFILES_DIR +
                      Wiimote::GetConfig()->GetProfileDirectoryName() + "/WiimoteHook.ini");
             controller->LoadConfig(ini.GetOrCreateSection("Profile"));
-            // Port 1 gets the first Wii Remote WiimoteHook sends, port 2 the second, and so on
-            // (falls back to the first one if there aren't that many yet).
-            std::vector<std::string> dsu_devices;
+            // Port 1 always uses the PC's first Wii Remote (DSUClient/0/...), port 2 the second, and
+            // so on, by name, even if the PC hasn't been seen yet. The PC's name is taken from any
+            // DSU device already listed, else WiimoteHook's usual "WiimoteHook PC". Never "DS4".
+            std::string pc_name = "WiimoteHook PC";
             for (const auto& device : devices)
             {
-              if (device.starts_with("DSUClient/"))
-                dsu_devices.push_back(device);
+              if (!device.starts_with("DSUClient/"))
+                continue;
+              const size_t slash = device.find('/', 10);
+              if (slash != std::string::npos && slash + 1 < device.size())
+              {
+                pc_name = device.substr(slash + 1);
+                break;
+              }
             }
-            if (!dsu_devices.empty())
-            {
-              const size_t pick = static_cast<size_t>(index) < dsu_devices.size() ?
-                                      static_cast<size_t>(index) :
-                                      0;
-              controller->SetDefaultDevice(dsu_devices[pick]);
-            }
+            controller->SetDefaultDevice("DSUClient/" + std::to_string(index) + "/" + pc_name);
             Config::SetBaseOrCurrent(Config::GetInfoForWiimoteSource(index),
                                      WiimoteSource::Emulated);
           }
