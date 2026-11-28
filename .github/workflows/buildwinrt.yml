@@ -10,6 +10,9 @@ on:
     branches:
       - master
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-2022
@@ -82,3 +85,19 @@ jobs:
           Source/AppPackages/**/Dependencies/x64/*.appx
           Source/AppPackages/**/*.cer
         if-no-files-found: error
+
+    # Frank's Xbox build: the install files on a fixed "latest" release, ready to download (no zip)
+    - name: Replace the latest release
+      if: matrix.configuration == 'Release' && github.event_name != 'pull_request'
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        New-Item -ItemType Directory -Force dist | Out-Null
+        Get-ChildItem -Recurse Source\AppPackages -Include *.msixbundle,*.cer | Copy-Item -Destination dist
+        Get-ChildItem -Recurse Source\AppPackages -Filter *.appx | Where-Object { $_.FullName -match '\\Dependencies\\x64\\' } | Copy-Item -Destination dist
+        Get-ChildItem dist
+        gh release delete latest --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag 2>$null
+        $notes = "Dolphin for Xbox, latest build of commit $($env:GITHUB_SHA.Substring(0,7)). On the Xbox Device Portal, add the Dolphin .msixbundle and add the .appx files as its dependencies, then set it to Game."
+        gh release create latest (Get-ChildItem dist).FullName --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Dolphin (latest build)" --notes $notes
+        exit 0
